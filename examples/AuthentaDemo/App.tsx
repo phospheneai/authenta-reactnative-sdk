@@ -27,8 +27,9 @@ import {
 } from 'react-native';
 
 // ─── Import ONLY these two things from the SDK ──────────────────────────────
-import { AuthentaClient, AuthentaCapture } from '@authenta/react-native-sdk';
-import type { ProcessedMedia } from '@authenta/react-native-sdk';
+import { AuthentaClient } from '@authenta/core';
+import type { ProcessedMedia } from '@authenta/core';
+import {AuthentaCapture} from "@authenta/react-native";
 
 // ─── 1. Create the client once (typically in a context or singleton) ─────────
 

@@ -1,20 +1,30 @@
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const path = require('path');
 
-// Use the packaged SDK (dist-only, no node_modules) — avoids version conflicts
-const sdkRoot = path.resolve(__dirname, 'node_modules/@authenta/react-native-sdk');
+// ─── Monorepo paths ───────────────────────────────────────────────────────────
+// examples/AuthentaDemo → ../.. → monorepo root
+const monoRoot    = path.resolve(__dirname, '../..');
+const coreRoot    = path.resolve(monoRoot, 'packages/core');
+const rnRoot      = path.resolve(monoRoot, 'packages/react-native');
 
 const config = {
-  watchFolders: [sdkRoot],
+  // Watch the entire monorepo so Metro picks up rebuilds of the SDK packages.
+  watchFolders: [monoRoot],
+
   resolver: {
-    // The SDK dist files are re-processed by Metro's Babel and need these peer deps
-    // resolved from the demo app, since the SDK package has no node_modules of its own.
     extraNodeModules: {
-      '@babel/runtime': path.resolve(__dirname, 'node_modules/@babel/runtime'),
-      'react': path.resolve(__dirname, 'node_modules/react'),
-      'react-native': path.resolve(__dirname, 'node_modules/react-native'),
+      // SDK packages — resolve to the local package roots.
+      // Metro reads their package.json `main` field → dist/index.js
+      '@authenta/core':         coreRoot,
+      '@authenta/react-native': rnRoot,
+
+      // Peer deps — always resolved from this app's own node_modules
+      // to avoid duplicate React / React Native instance errors.
+      'react':                      path.resolve(__dirname, 'node_modules/react'),
+      'react-native':               path.resolve(__dirname, 'node_modules/react-native'),
       'react-native-vision-camera': path.resolve(__dirname, 'node_modules/react-native-vision-camera'),
-      'react-native-image-picker': path.resolve(__dirname, 'node_modules/react-native-image-picker'),
+      'react-native-image-picker':  path.resolve(__dirname, 'node_modules/react-native-image-picker'),
+      '@babel/runtime':             path.resolve(__dirname, 'node_modules/@babel/runtime'),
     },
   },
 };

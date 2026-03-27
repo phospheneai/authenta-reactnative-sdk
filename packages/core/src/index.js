@@ -13,15 +13,14 @@ var __createBinding = (this && this.__createBinding) || (Object.create ? (functi
 var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
-exports.__esModule = true;
-exports.isVideo = exports.isImage = exports.getMimeType = exports.AuthentaCapture = exports.AuthentaClient = void 0;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.safeJsonParse = exports.isVideo = exports.isImage = exports.getMimeType = exports.AuthentaClient = void 0;
 var client_1 = require("./client");
-__createBinding(exports, client_1, "AuthentaClient");
-var AuthentaCapture_1 = require("./AuthentaCapture");
-__createBinding(exports, AuthentaCapture_1, "AuthentaCapture");
+Object.defineProperty(exports, "AuthentaClient", { enumerable: true, get: function () { return client_1.AuthentaClient; } });
 __exportStar(require("./types"), exports);
 __exportStar(require("./errors"), exports);
 var helpers_1 = require("./utils/helpers");
-__createBinding(exports, helpers_1, "getMimeType");
-__createBinding(exports, helpers_1, "isImage");
-__createBinding(exports, helpers_1, "isVideo");
+Object.defineProperty(exports, "getMimeType", { enumerable: true, get: function () { return helpers_1.getMimeType; } });
+Object.defineProperty(exports, "isImage", { enumerable: true, get: function () { return helpers_1.isImage; } });
+Object.defineProperty(exports, "isVideo", { enumerable: true, get: function () { return helpers_1.isVideo; } });
+Object.defineProperty(exports, "safeJsonParse", { enumerable: true, get: function () { return helpers_1.safeJsonParse; } });

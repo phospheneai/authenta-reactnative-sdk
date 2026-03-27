@@ -103,7 +103,7 @@ export interface BoundingBoxesMap {
   [identityId: string]: IdentityBoundingBox;
 }
 
-// Returned by process() and faceIntelligence() after polling completes
+// Returned by faceIntelligence() after polling completes
 export interface ProcessedMedia extends MediaRecord {
   result?: DetectionResult;
 }

@@ -1,7 +1,8 @@
-// import { MimeType } from '../types';
-
-export const getMimeType = (path: string): string => {
-    const mimeTypes: { [key: string]: string } = {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.safeJsonParse = exports.isVideo = exports.isImage = exports.getMimeType = void 0;
+const getMimeType = (path) => {
+    const mimeTypes = {
         // Images
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
@@ -10,7 +11,6 @@ export const getMimeType = (path: string): string => {
         '.webp': 'image/webp',
         '.bmp': 'image/bmp',
         '.svg': 'image/svg+xml',
-        
         // Videos
         '.mp4': 'video/mp4',
         '.mov': 'video/quicktime',
@@ -21,7 +21,6 @@ export const getMimeType = (path: string): string => {
         '.wmv': 'video/x-ms-wmv',
         '.m4v': 'video/x-m4v',
         '.3gp': 'video/3gpp',
-
         // Audio
         '.mp3': 'audio/mpeg',
         '.wav': 'audio/wav',
@@ -30,31 +29,25 @@ export const getMimeType = (path: string): string => {
         '.flac': 'audio/flac',
         '.ogg': 'audio/ogg',
     };
-    // Extract file extension
     const extension = path.substring(path.lastIndexOf('.')).toLowerCase();
-    
     return mimeTypes[extension] || 'application/octet-stream';
-}
-
-/**
- * Check if file is an image
- */
-export const isImage = (mimeType: string): boolean => {
-  return mimeType.startsWith('image/');
 };
-
-/**
- * Check if file is a video
- */
-export const isVideo = (mimeType: string): boolean => {
-  return mimeType.startsWith('video/');
+exports.getMimeType = getMimeType;
+const isImage = (mimeType) => {
+    return mimeType.startsWith('image/');
 };
-
-export const safeJsonParse = (jsonString: string): any => {
+exports.isImage = isImage;
+const isVideo = (mimeType) => {
+    return mimeType.startsWith('video/');
+};
+exports.isVideo = isVideo;
+const safeJsonParse = (jsonString) => {
     try {
         return JSON.parse(jsonString);
-    } catch (error) {
+    }
+    catch (error) {
         console.error('JSON parsing error:', error);
         return null;
     }
 };
+exports.safeJsonParse = safeJsonParse;
