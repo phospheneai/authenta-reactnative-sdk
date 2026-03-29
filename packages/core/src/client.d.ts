@@ -33,7 +33,7 @@ export declare class AuthentaClient {
      * Pass `fiOptions` only when modelType is "FI-1".
      */
     upload(uri: string, modelType: ModelType, fiOptions?: FIOptions): Promise<CreateMediaResponse>;
-    waitForMedia(mid: string, { interval, timeout }?: PollingOptions): Promise<MediaRecord>;
+    pollResult(mid: string, { interval, timeout }?: PollingOptions): Promise<MediaRecord>;
     getResult(media: MediaRecord): Promise<DetectionResult>;
     /**
      * Upload a file URI and process it with the given model.

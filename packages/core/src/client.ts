@@ -232,7 +232,7 @@ export class AuthentaClient {
 
   // ─── Polling ───────────────────────────────────────────────────────────────
 
-  async waitForMedia(
+  async pollResult(
     mid: string,
     { interval = 5000, timeout = 600_000 }: PollingOptions = {},
   ): Promise<MediaRecord> {
@@ -332,7 +332,7 @@ export class AuthentaClient {
     const meta = await this.upload(uri, modelType, fiOptions);
     if (!autoPolling) return meta as ProcessedMedia;
 
-    const media = await this.waitForMedia(meta.mid, { interval, timeout });
+    const media = await this.pollResult(meta.mid, { interval, timeout });
     const result = media.resultURL ? await this.getResult(media) : undefined;
     return { ...media, result };
   }

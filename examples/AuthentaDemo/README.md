@@ -1,6 +1,6 @@
 # Authenta Demo App
 
-A minimal React Native app that demonstrates how to integrate the [Authenta React Native SDK](../../src).
+A minimal React Native app that demonstrates how to integrate the [Authenta React Native SDK].
 
 The entire integration lives in a **single file** — [App.tsx](./App.tsx). This is the only file a client developer needs to write when using the SDK.
 

@@ -183,7 +183,7 @@ const media = await client.upload('file:///path/to/selfie.jpg', 'FI-1', {
 console.log(media.mid); // "abc-123"
 
 // 2. Poll until processing completes
-const processed = await client.waitForMedia(media.mid, {
+const processed = await client.pollResult(media.mid, {
   interval: 3000,    // poll every 3 s
   timeout:  120000,  // give up after 2 min
 });

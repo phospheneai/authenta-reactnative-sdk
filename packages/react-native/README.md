@@ -40,13 +40,19 @@ React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC plat
 npm install @authenta/react-native
 ```
 
-Install the required peer dependencies:
+This installs `@authenta/core`, `react-native-vision-camera`, and `react-native-image-picker` automatically.
+
+After installation, rebuild your app to link the native modules:
 
 ```bash
-npm install react-native-vision-camera react-native-image-picker
-```
+# Android
+cd android && ./gradlew clean && cd ..
+npx react-native run-android
 
-> These are peer dependencies — they must be installed in **your app**, not the SDK. After installing any package that contains native code you must rebuild the app.
+# iOS
+cd ios && pod install && cd ..
+npx react-native run-ios
+```
 
 ---
 
@@ -105,8 +111,8 @@ npx react-native run-ios
 ```tsx
 import React, { useState } from 'react';
 import { Button, View } from 'react-native';
-import { AuthentaClient, AuthentaCapture } from '@authenta/react-native';
-import type { ProcessedMedia } from '@authenta/react-native';
+import { AuthentaCapture } from '@authenta/react-native';
+import type { ProcessedMedia, AuthentaClient } from '@authenta/core';
 
 // Create the client once — outside your component or in a context/singleton
 const client = new AuthentaClient({
@@ -123,6 +129,7 @@ export default function App() {
 
       <AuthentaCapture
         client={client}
+        modelType="FI-1"
         visible={visible}
         onClose={() => setVisible(false)}
         onResult={(result: ProcessedMedia) => {
@@ -235,7 +242,7 @@ See the [AuthentaDemo](../../AuthentaDemo/) app for a complete runnable integrat
 `@authenta/react-native` re-exports the full `AuthentaClient` API from `@authenta/core`. Use it headless if you want your own camera UI.
 
 ```ts
-import { AuthentaClient } from '@authenta/react-native';
+import { AuthentaClient } from '@authenta/core';
 
 const client = new AuthentaClient({
   clientId:     'YOUR_CLIENT_ID',
@@ -249,7 +256,7 @@ const result = await client.faceIntelligence('file:///path/to/selfie.jpg', 'FI-1
 
 // Low-level
 const media     = await client.upload(uri, 'FI-1', { livenessCheck: true });
-const processed = await client.waitForMedia(media.mid);
+const processed = await client.pollResult(media.mid);
 const result    = await client.getResult(processed);
 
 // CRUD
@@ -304,37 +311,6 @@ if (err instanceof AuthenticationError) {
 | `details` | `object?` | Raw API response body |
 
 ---
-
-## TypeScript Types
-
-All types from both packages are re-exported from `@authenta/react-native`:
-
-```ts
-import type {
-  // Component
-  AuthentaCaptureProps,
-
-  // Client config
-  AuthentaClientConfig,
-
-  // Options
-  RunOptions,
-  FIOptions,
-  PollingOptions,
-
-  // API responses
-  ProcessedMedia,
-  MediaRecord,
-  CreateMediaResponse,
-  ListMediaResponse,
-  DetectionResult,
-
-  // Supporting types
-  ModelType,
-  MediaStatus,
-  FileInfo,
-} from '@authenta/react-native';
-```
 
 ---
 

@@ -95,6 +95,10 @@ npm publish --workspace=packages/react-native --access public
 
 See [AuthentaDemo/](./examples/AuthentaDemo/) for a runnable React Native app that demonstrates the full integration.
 
+<p align="center">
+  <img src="examples/mobile-app-demo.gif" alt="Authenta Demo" width="200" height="400" autoplay loop />
+</p>
+
 ---
 
 ## License

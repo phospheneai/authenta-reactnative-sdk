@@ -3,7 +3,7 @@
  *
  * Two modes:
  *   1. Single function  — client.faceIntelligence()  handles everything in one call
- *   2. Step by step     — createMedia → upload → waitForMedia → getResult manually
+ *   2. Step by step     — createMedia → upload → pollResult → getResult manually
  *
  * Flip the TEST flags to choose what to run, then:
  *   npx ts-node __tests__/client.test.ts
@@ -121,14 +121,14 @@ async function singleFunctionTests() {
 
 async function stepByStepTests() {
   console.log('\n╔══════════════════════════════════════════════════════════════╗');
-  console.log('║  STEP BY STEP: upload → waitForMedia → getResult            ║');
+  console.log('║  STEP BY STEP: upload → pollResult → getResult            ║');
   console.log('╚══════════════════════════════════════════════════════════════╝');
 
   if (TEST.steps.df1) {
     console.log('\n── DF-1: step by step ───────────────────────────────────────');
     const uploaded = await client.faceIntelligence(VIDEO_URI, 'DF-1', { autoPolling: false });
     console.log('uploaded — mid    :', uploaded.mid);
-    const media = await client.waitForMedia(uploaded.mid);
+    const media = await client.pollResult(uploaded.mid);
     if (media.resultURL) {
       const result = await client.getResult(media);
       console.log('result :', result);
@@ -138,7 +138,7 @@ async function stepByStepTests() {
   if (TEST.steps.ac1) {
     console.log('\n── AC-1: step by step ───────────────────────────────────────');
     const uploaded = await client.faceIntelligence(IMAGE_URI, 'AC-1', { autoPolling: false });
-    const media = await client.waitForMedia(uploaded.mid);
+    const media = await client.pollResult(uploaded.mid);
     if (media.resultURL) {
       const result = await client.getResult(media);
       console.log('result :', result);
@@ -151,7 +151,7 @@ async function stepByStepTests() {
       livenessCheck: true,
       autoPolling: false,
     });
-    const media = await client.waitForMedia(uploaded.mid);
+    const media = await client.pollResult(uploaded.mid);
     if (media.resultURL) {
       const result = await client.getResult(media);
       console.log('isLiveness :', result.isLiveness);
@@ -164,7 +164,7 @@ async function stepByStepTests() {
       faceswapCheck: true,
       autoPolling: false,
     });
-    const media = await client.waitForMedia(uploaded.mid);
+    const media = await client.pollResult(uploaded.mid);
     if (media.resultURL) {
       const result = await client.getResult(media);
       console.log('isDeepFake :', result.isDeepFake);
@@ -178,7 +178,7 @@ async function stepByStepTests() {
       referenceImage: REF_URI,
       autoPolling: false,
     });
-    const media = await client.waitForMedia(uploaded.mid);
+    const media = await client.pollResult(uploaded.mid);
     if (media.resultURL) {
       const result = await client.getResult(media);
       console.log('isSimilar       :', result.isSimilar);

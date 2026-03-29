@@ -158,7 +158,7 @@ class AuthentaClient {
         return media;
     }
     // ─── Polling ───────────────────────────────────────────────────────────────
-    async waitForMedia(mid, { interval = 5000, timeout = 600000 } = {}) {
+    async pollResult(mid, { interval = 5000, timeout = 600000 } = {}) {
         const deadline = Date.now() + timeout;
         while (true) {
             const media = await this.getMedia(mid);
@@ -226,7 +226,7 @@ class AuthentaClient {
         const meta = await this.upload(uri, modelType, fiOptions);
         if (!autoPolling)
             return meta;
-        const media = await this.waitForMedia(meta.mid, { interval, timeout });
+        const media = await this.pollResult(meta.mid, { interval, timeout });
         const result = media.resultURL ? await this.getResult(media) : undefined;
         return Object.assign(Object.assign({}, media), { result });
     }

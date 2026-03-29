@@ -20,13 +20,13 @@
   "author": "Authenta",
   "license": "MIT",
   "dependencies": {
-    "@authenta/core": "*"
+    "@authenta/core": "1.0.1",
+    "react-native-image-picker": "^8.2.1",
+    "react-native-vision-camera": "^4.6.4"
   },
   "peerDependencies": {
     "react": ">=18",
-    "react-native": ">=0.72",
-    "react-native-image-picker": ">=7",
-    "react-native-vision-camera": ">=4"
+    "react-native": ">=0.72"
   },
   "devDependencies": {
     "@types/jest": "^29.0.0",
@@ -34,8 +34,6 @@
     "jest": "^29.0.0",
     "react": "18.3.1",
     "react-native": "0.76.5",
-    "react-native-image-picker": "^8.2.1",
-    "react-native-vision-camera": "^4.6.4",
     "ts-jest": "^29.0.0",
     "typescript": "^4.0.0"
   }
