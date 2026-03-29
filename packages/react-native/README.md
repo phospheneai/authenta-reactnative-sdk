@@ -19,7 +19,6 @@ React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC plat
 - [Using AuthentaClient Directly](#using-authentaclient-directly)
 - [Error Handling](#error-handling)
 - [TypeScript Types](#typescript-types)
-- [Contributing](#contributing)
 
 ---
 
@@ -309,59 +308,6 @@ if (err instanceof AuthenticationError) {
 | `code` | `string?` | API error code (e.g. `IAM001`) |
 | `statusCode` | `number?` | HTTP status code |
 | `details` | `object?` | Raw API response body |
-
----
-
----
-
-## Contributing
-
-### Setup
-
-```bash
-git clone https://github.com/phospheneai/authenta-reactnative-sdk.git
-cd authenta-reactnative-sdk
-npm install
-```
-
-### Build
-
-Build core first (react-native depends on it), then react-native:
-
-```bash
-npm run build
-```
-
-Or individually:
-
-```bash
-npm run build --workspace=packages/core
-npm run build --workspace=packages/react-native
-```
-
-### Test
-
-```bash
-npm test --workspace=packages/react-native
-```
-
-### Guidelines
-
-- **Peer dependencies only** — `react`, `react-native`, `react-native-vision-camera`, and `react-native-image-picker` must remain as `peerDependencies`. Never move them to `dependencies`.
-- **No Node.js built-ins** — Metro cannot resolve `fs`, `path`, `crypto`, etc. File reads use `XMLHttpRequest`.
-- **Core owns all API logic** — do not duplicate `AuthentaClient` logic in this package. `AuthentaCapture` calls `client.faceIntelligence()` and nothing else.
-- **Capture mode rules live in one place** — the `resolveCaptureMode` function in `AuthentaCapture.tsx` is the single source of truth.
-- **Typed errors** — import error classes from `@authenta/core` and re-export them via `index.ts`.
-
-### Publish
-
-Publish `@authenta/core` before publishing this package (this package depends on it):
-
-```bash
-# Bump versions in both package.json files, then:
-npm publish --workspace=packages/core --access public
-npm publish --workspace=packages/react-native --access public
-```
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "@authenta/react-native",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Authenta React Native SDK — camera capture UI powered by @authenta/core",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

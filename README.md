@@ -43,51 +43,9 @@ authenta-reactnative-sdk/
 
 ---
 
-## Development
+## Contributing
 
-### Prerequisites
-
-- Node.js >= 18
-- npm >= 8 (workspaces support)
-
-### Install
-
-```bash
-git clone https://github.com/phospheneai/authenta-reactnative-sdk.git
-cd authenta-reactnative-sdk
-npm install
-```
-
-### Build both packages
-
-```bash
-npm run build
-```
-
-This compiles `@authenta/core` first, then `@authenta/react-native` (which depends on core).
-
-### Run tests
-
-```bash
-npm test --workspaces
-```
-
----
-
-## Publishing
-
-See the individual package READMEs for full details.
-
-```bash
-# Log in once
-npm login
-
-# Publish core
-npm publish --workspace=packages/core --access public
-
-# Publish react-native (depends on core — publish core first)
-npm publish --workspace=packages/react-native --access public
-```
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, build, test, guidelines, and publish steps.
 
 ---
 

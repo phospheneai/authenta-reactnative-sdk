@@ -18,7 +18,6 @@ Use this package directly if you want headless control over uploads, polling, an
 - [Models](#models)
 - [Error Handling](#error-handling)
 - [TypeScript Types](#typescript-types)
-- [Contributing](#contributing)
 
 ---
 
@@ -277,46 +276,6 @@ import type {
   ProcessedMedia,
 } from '@authenta/core';
 ```
-
----
-
-## Contributing
-
-### Setup
-
-```bash
-git clone https://github.com/phospheneai/authenta-reactnative-sdk.git
-cd authenta-reactnative-sdk
-npm install
-```
-
-### Build
-
-```bash
-npm run build --workspace=packages/core
-```
-
-### Test
-
-```bash
-npm test --workspace=packages/core
-```
-
-### Guidelines
-
-- **No native modules** — this package must work in plain Node.js. Do not import React, React Native, or any native module.
-- **No Node.js built-ins at the top level** — Metro (React Native bundler) cannot resolve `fs`, `path`, etc. Use the `_require = require` alias trick only inside runtime guards (`typeof XMLHttpRequest === 'undefined'`).
-- **Typed errors** — all thrown values must extend `AuthentaError`. New error types go in `errors.ts` and must be exported from `index.ts`.
-- **Types in one place** — all interfaces belong in `src/types/index.ts`.
-- **No breaking changes** — `AuthentaClient` and all exported types are the stable public surface.
-
-### Publish
-
-```bash
-# Bump version in packages/core/package.json, then:
-npm publish --workspace=packages/core --access public
-```
-
 ---
 
 ## License
