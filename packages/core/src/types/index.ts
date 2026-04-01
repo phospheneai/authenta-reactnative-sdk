@@ -25,7 +25,7 @@ export interface PollingOptions {
   timeout?: number;  // ms total timeout, default 600000
 }
 
-// Options for faceIntelligence() — FI-1 fields are validated and used only when modelType is "FI-1"
+// Options for uploadAndPoll() — FI-1 fields are validated and used only when modelType is "FI-1"
 export interface RunOptions extends FIOptions, PollingOptions {
   autoPolling?: boolean; // default true — wait for result before returning
 }
@@ -103,7 +103,7 @@ export interface BoundingBoxesMap {
   [identityId: string]: IdentityBoundingBox;
 }
 
-// Returned by faceIntelligence() after polling completes
+// Returned by uploadAndPoll() after polling completes
 export interface ProcessedMedia extends MediaRecord {
   result?: DetectionResult;
 }

@@ -249,7 +249,7 @@ const client = new AuthentaClient({
 });
 
 // High-level: upload + poll + result in one call
-const result = await client.faceIntelligence('file:///path/to/selfie.jpg', 'FI-1', {
+const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
   livenessCheck: true,
 });
 
@@ -281,7 +281,7 @@ import {
   ServerError,
 } from '@authenta/react-native';
 
-// In onError prop or try/catch around faceIntelligence()
+// In onError prop or try/catch around uploadAndPoll()
 if (err instanceof AuthenticationError) {
   // Invalid clientId / clientSecret
 } else if (err instanceof AuthorizationError) {

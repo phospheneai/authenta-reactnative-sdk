@@ -282,21 +282,21 @@ export class AuthentaClient {
    * - Set `autoPolling: false` to return immediately after upload.
    *
    * @example DF-1 / AC-1
-   *   const result = await client.faceIntelligence('file:///path/to/video.mp4', 'DF-1');
+   *   const result = await client.uploadAndPoll('file:///path/to/video.mp4', 'DF-1');
    *
    * @example FI-1 liveness
-   *   const result = await client.faceIntelligence('file:///path/to/selfie.jpg', 'FI-1', { livenessCheck: true });
+   *   const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', { livenessCheck: true });
    *
    * @example FI-1 faceswap (video only)
-   *   const result = await client.faceIntelligence('file:///path/to/video.mp4', 'FI-1', { faceswapCheck: true });
+   *   const result = await client.uploadAndPoll('file:///path/to/video.mp4', 'FI-1', { faceswapCheck: true });
    *
    * @example FI-1 similarity
-   *   const result = await client.faceIntelligence('file:///path/to/selfie.jpg', 'FI-1', {
+   *   const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
    *     faceSimilarityCheck: true,
    *     referenceImage: 'file:///path/to/id-photo.jpg',
    *   });
    */
-  async faceIntelligence(
+  async uploadAndPoll(
     uri: string,
     modelType: ModelType,
     {

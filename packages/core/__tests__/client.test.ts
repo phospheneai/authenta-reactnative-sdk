@@ -2,7 +2,7 @@
  * Authenta SDK – manual integration test
  *
  * Two modes:
- *   1. Single function  — client.faceIntelligence()  handles everything in one call
+ *   1. Single function  — client.uploadAndPoll()  handles everything in one call
  *   2. Step by step     — createMedia → upload → pollResult → getResult manually
  *
  * Flip the TEST flags to choose what to run, then:
@@ -54,12 +54,12 @@ const TEST = {
 
 async function singleFunctionTests() {
   console.log('\n╔══════════════════════════════════════╗');
-  console.log('║  SINGLE FUNCTION: client.faceIntelligence()  ║');
+  console.log('║  SINGLE FUNCTION: client.uploadAndPoll()  ║');
   console.log('╚══════════════════════════════════════╝');
 
   if (TEST.single.df1) {
     console.log('\n── DF-1: Deepfake detection ─────────────────────────────────');
-    const result = await client.faceIntelligence(VIDEO_URI, 'DF-1');
+    const result = await client.uploadAndPoll(VIDEO_URI, 'DF-1');
     console.log('mid    :', result.mid);
     console.log('status :', result.status);
     console.log('result :', result.result);
@@ -67,7 +67,7 @@ async function singleFunctionTests() {
 
   if (TEST.single.ac1) {
     console.log('\n── AC-1: AI-generated image check ──────────────────────────');
-    const result = await client.faceIntelligence(IMAGE_URI, 'AC-1');
+    const result = await client.uploadAndPoll(IMAGE_URI, 'AC-1');
     console.log('mid    :', result.mid);
     console.log('status :', result.status);
     console.log('result :', result.result);
@@ -75,7 +75,7 @@ async function singleFunctionTests() {
 
   if (TEST.single.fi1) {
     console.log('\n── FI-1: Face Intelligence check ────────────────────────────');
-    const result = await client.faceIntelligence(IMAGE_URI, 'FI-1', {
+    const result = await client.uploadAndPoll(IMAGE_URI, 'FI-1', {
       livenessCheck:      TEST.single.fi1_liveness,
       faceswapCheck:      TEST.single.fi1_faceswap,
       faceSimilarityCheck: TEST.single.fi1_similarity,
@@ -88,7 +88,7 @@ async function singleFunctionTests() {
 
   if (TEST.single.fi1_liveness) {
     console.log('\n── FI-1: Liveness check ─────────────────────────────────────');
-    const result = await client.faceIntelligence(IMAGE_URI, 'FI-1', { livenessCheck: true });
+    const result = await client.uploadAndPoll(IMAGE_URI, 'FI-1', { livenessCheck: true });
     console.log('mid        :', result.mid);
     console.log('status     :', result.status);
     console.log('isLiveness :', result.result?.isLiveness);
@@ -96,7 +96,7 @@ async function singleFunctionTests() {
 
   if (TEST.single.fi1_faceswap) {
     console.log('\n── FI-1: Faceswap check ─────────────────────────────────────');
-    const result = await client.faceIntelligence(VIDEO_URI, 'FI-1', { faceswapCheck: true });
+    const result = await client.uploadAndPoll(VIDEO_URI, 'FI-1', { faceswapCheck: true });
     console.log('mid        :', result.mid);
     console.log('status     :', result.status);
     console.log('isDeepFake :', result.result?.isDeepFake);
@@ -104,7 +104,7 @@ async function singleFunctionTests() {
 
   if (TEST.single.fi1_similarity) {
     console.log('\n── FI-1: Face similarity ────────────────────────────────────');
-    const result = await client.faceIntelligence(IMAGE_URI, 'FI-1', {
+    const result = await client.uploadAndPoll(IMAGE_URI, 'FI-1', {
       faceSimilarityCheck: true,
       referenceImage: REF_URI,
     });
@@ -126,7 +126,7 @@ async function stepByStepTests() {
 
   if (TEST.steps.df1) {
     console.log('\n── DF-1: step by step ───────────────────────────────────────');
-    const uploaded = await client.faceIntelligence(VIDEO_URI, 'DF-1', { autoPolling: false });
+    const uploaded = await client.uploadAndPoll(VIDEO_URI, 'DF-1', { autoPolling: false });
     console.log('uploaded — mid    :', uploaded.mid);
     const media = await client.pollResult(uploaded.mid);
     if (media.resultURL) {
@@ -137,7 +137,7 @@ async function stepByStepTests() {
 
   if (TEST.steps.ac1) {
     console.log('\n── AC-1: step by step ───────────────────────────────────────');
-    const uploaded = await client.faceIntelligence(IMAGE_URI, 'AC-1', { autoPolling: false });
+    const uploaded = await client.uploadAndPoll(IMAGE_URI, 'AC-1', { autoPolling: false });
     const media = await client.pollResult(uploaded.mid);
     if (media.resultURL) {
       const result = await client.getResult(media);
@@ -147,7 +147,7 @@ async function stepByStepTests() {
 
   if (TEST.steps.fi1_liveness) {
     console.log('\n── FI-1 liveness: step by step ──────────────────────────────');
-    const uploaded = await client.faceIntelligence(IMAGE_URI, 'FI-1', {
+    const uploaded = await client.uploadAndPoll(IMAGE_URI, 'FI-1', {
       livenessCheck: true,
       autoPolling: false,
     });
@@ -160,7 +160,7 @@ async function stepByStepTests() {
 
   if (TEST.steps.fi1_faceswap) {
     console.log('\n── FI-1 faceswap: step by step ──────────────────────────────');
-    const uploaded = await client.faceIntelligence(VIDEO_URI, 'FI-1', {
+    const uploaded = await client.uploadAndPoll(VIDEO_URI, 'FI-1', {
       faceswapCheck: true,
       autoPolling: false,
     });
@@ -173,7 +173,7 @@ async function stepByStepTests() {
 
   if (TEST.steps.fi1_similarity) {
     console.log('\n── FI-1 similarity: step by step ────────────────────────────');
-    const uploaded = await client.faceIntelligence(IMAGE_URI, 'FI-1', {
+    const uploaded = await client.uploadAndPoll(IMAGE_URI, 'FI-1', {
       faceSimilarityCheck: true,
       referenceImage: REF_URI,
       autoPolling: false,

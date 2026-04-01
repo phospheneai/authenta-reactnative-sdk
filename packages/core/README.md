@@ -12,7 +12,7 @@ Use this package directly if you want headless control over uploads, polling, an
 - [Quick Start](#quick-start)
 - [AuthentaClient](#authentaclient)
   - [Configuration](#configuration)
-  - [faceIntelligence()](#faceintelligence)
+  - [uploadAndPoll()](#uploadandpoll)
   - [RunOptions](#runoptions)
   - [Low-level API](#low-level-api)
 - [Models](#models)
@@ -41,7 +41,7 @@ const client = new AuthentaClient({
   clientSecret: 'YOUR_CLIENT_SECRET',
 });
 
-const result = await client.faceIntelligence('file:///path/to/selfie.jpg', 'FI-1', {
+const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
   livenessCheck: true,
 });
 
@@ -71,12 +71,12 @@ const client = new AuthentaClient({
 
 ---
 
-### faceIntelligence()
+### uploadAndPoll()
 
 The primary high-level method. Uploads the file, polls until processing is complete, fetches the detection result, and returns a `ProcessedMedia` object.
 
 ```ts
-const result = await client.faceIntelligence(uri, modelType, options);
+const result = await client.uploadAndPoll(uri, modelType, options);
 ```
 
 **Parameters**
@@ -91,29 +91,29 @@ const result = await client.faceIntelligence(uri, modelType, options);
 
 ```ts
 // Liveness check — photo
-const result = await client.faceIntelligence('file:///path/to/selfie.jpg', 'FI-1', {
+const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
   livenessCheck: true,
 });
 
 // Faceswap check — video
-const result = await client.faceIntelligence('file:///path/to/clip.mp4', 'FI-1', {
+const result = await client.uploadAndPoll('file:///path/to/clip.mp4', 'FI-1', {
   faceswapCheck: true,
 });
 
 // Liveness + faceswap — video
-const result = await client.faceIntelligence('file:///path/to/clip.mp4', 'FI-1', {
+const result = await client.uploadAndPoll('file:///path/to/clip.mp4', 'FI-1', {
   livenessCheck: true,
   faceswapCheck: true,
 });
 
 // Face similarity — photo + reference
-const result = await client.faceIntelligence('file:///path/to/selfie.jpg', 'FI-1', {
+const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
   faceSimilarityCheck: true,
   referenceImage: 'file:///path/to/id-photo.jpg',
 });
 
 // Liveness + face similarity — photo
-const result = await client.faceIntelligence('file:///path/to/selfie.jpg', 'FI-1', {
+const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
   livenessCheck: true,
   faceSimilarityCheck: true,
   referenceImage: 'file:///path/to/id-photo.jpg',
@@ -223,7 +223,7 @@ import {
 } from '@authenta/core';
 
 try {
-  const result = await client.faceIntelligence(uri, 'FI-1', { livenessCheck: true });
+  const result = await client.uploadAndPoll(uri, 'FI-1', { livenessCheck: true });
 } catch (err) {
   if (err instanceof AuthenticationError) {
     // Invalid clientId / clientSecret — check your credentials

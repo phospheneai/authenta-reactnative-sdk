@@ -2,7 +2,7 @@
  * AuthentaCapture — self-contained modal UI for eKYC face capture.
  *
  * Uses react-native-vision-camera for live camera access, then passes the
- * captured URI straight to AuthentaClient.faceIntelligence() and returns a ProcessedMedia
+ * captured URI straight to AuthentaClient.uploadAndPoll() and returns a ProcessedMedia
  * result via the onResult callback.
  *
  * Peer dependencies required in the host app:
@@ -238,7 +238,7 @@ export function AuthentaCapture({
   const runProcessing = useCallback(async (uri: string) => {
     setStep('processing');
     try {
-      const result = await client.faceIntelligence(uri, modelType, {
+      const result = await client.uploadAndPoll(uri, modelType, {
         livenessCheck: liveness,
         faceswapCheck: faceswap,
         faceSimilarityCheck: similarity,

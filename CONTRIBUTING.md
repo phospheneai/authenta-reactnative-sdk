@@ -101,7 +101,7 @@ authenta-reactnative-sdk/
 ├── packages/
 │   ├── core/
 │   │   ├── src/
-│   │   │   ├── client.ts          # AuthentaClient — upload, poll, getResult, faceIntelligence
+│   │   │   ├── client.ts          # AuthentaClient — upload, poll, getResult, uploadAndPoll
 │   │   │   ├── errors.ts          # All typed error classes
 │   │   │   ├── types/index.ts     # All TypeScript interfaces and types
 │   │   │   ├── utils/helpers.ts   # getMimeType, isImage, isVideo, safeJsonParse
@@ -156,7 +156,7 @@ authenta-reactnative-sdk/
 
 ### @authenta/react-native
 
-- **Core owns all API logic** — `AuthentaCapture` only calls `client.faceIntelligence()`. Do not duplicate any upload, polling, or result-fetching logic here.
+- **Core owns all API logic** — `AuthentaCapture` only calls `client.uploadAndPoll()`. Do not duplicate any upload, polling, or result-fetching logic here.
 - **Capture mode rules in one place** — the `resolveCaptureMode()` function in `AuthentaCapture.tsx` is the single source of truth for which capture mode maps to which check combination. See [Capture Mode Rules](#capture-mode-rules).
 - **No Node.js built-ins** — Metro cannot resolve `fs`, `path`, `crypto`, etc. File reads use `XMLHttpRequest`.
 - **`react` and `react-native` are peer dependencies** — they must never be moved to `dependencies`. Having two copies of React in the same app causes runtime crashes.
