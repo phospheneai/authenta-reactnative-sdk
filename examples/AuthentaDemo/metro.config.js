@@ -1,25 +1,29 @@
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const path = require('path');
 
-// ─── Monorepo paths ───────────────────────────────────────────────────────────
-// examples/AuthentaDemo → ../.. → monorepo root
-const monoRoot    = path.resolve(__dirname, '../..');
-const coreRoot    = path.resolve(monoRoot, 'packages/core');
-const rnRoot      = path.resolve(monoRoot, 'packages/react-native');
+const monoRoot = path.resolve(__dirname, '../..');
+const coreRoot = path.resolve(monoRoot, 'packages/core');
+const rnRoot   = path.resolve(monoRoot, 'packages/react-native');
+
+// Escape a string for literal use inside a RegExp
+const esc = s => s.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&');
 
 const config = {
-  // Watch the entire monorepo so Metro picks up rebuilds of the SDK packages.
   watchFolders: [monoRoot],
 
   resolver: {
+    // Block the root-level react and react-native from being bundled.
+    // Without this, Metro follows Node's upward resolution from the SDK
+    // packages and picks up the root copies instead of the app's own copies,
+    // causing Flow-syntax parse errors (root copy is not pre-transformed).
+    blockList: [
+      new RegExp(`^${esc(path.join(monoRoot, 'node_modules', 'react'))}[/\\\\].*`),
+      new RegExp(`^${esc(path.join(monoRoot, 'node_modules', 'react-native'))}[/\\\\].*`),
+    ],
+
     extraNodeModules: {
-      // SDK packages — resolve to the local package roots.
-      // Metro reads their package.json `main` field → dist/index.js
       '@authenta/core':         coreRoot,
       '@authenta/react-native': rnRoot,
-
-      // Peer deps — always resolved from this app's own node_modules
-      // to avoid duplicate React / React Native instance errors.
       'react':                      path.resolve(__dirname, 'node_modules/react'),
       'react-native':               path.resolve(__dirname, 'node_modules/react-native'),
       'react-native-vision-camera': path.resolve(__dirname, 'node_modules/react-native-vision-camera'),
