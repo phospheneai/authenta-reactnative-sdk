@@ -75,6 +75,11 @@ npx react-native run-android
 
 # iOS
 npx react-native run-ios
+
+# For cache clearing issues, try:
+npx react-native start --reset-cache
+
+# then press 'a' to run on Android again or 'i' for iOS after cache reset
 ```
 
 > After installing any new package with native code, always do a full rebuild — not just a Metro reload.
