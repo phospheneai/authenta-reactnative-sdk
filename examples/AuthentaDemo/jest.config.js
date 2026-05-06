@@ -3,8 +3,8 @@ module.exports = {
 
   // Map SDK package imports to their compiled dist output
   moduleNameMapper: {
-    '^@authenta/core$':         '<rootDir>/../../packages/core/dist/index.js',
-    '^@authenta/react-native$': '<rootDir>/../../packages/react-native/dist/index.js',
+    '^@authenta/core$':         '<rootDir>/node_modules/@authenta/core/dist/index.js',
+    '^@authenta/react-native$': '<rootDir>/node_modules/@authenta/react-native/dist/index.js',
   },
 
   // Tell Jest to transform these packages (they ship as ESM / raw TypeScript via symlink)

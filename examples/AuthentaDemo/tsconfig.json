@@ -5,8 +5,8 @@
     "types": ["jest"],
     "baseUrl": ".",
     "paths": {
-      "@authenta/core":         ["../../packages/core/dist/index"],
-      "@authenta/react-native": ["../../packages/react-native/dist/index"]
+      "@authenta/core":         ["node_modules/@authenta/core"],
+      "@authenta/react-native": ["node_modules/@authenta/react-native"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],

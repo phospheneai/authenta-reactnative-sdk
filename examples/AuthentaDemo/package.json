@@ -10,8 +10,8 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@authenta/core": "file:../../packages/core",
-    "@authenta/react-native": "file:../../packages/react-native",
+    "@authenta/core": "1.0.2",
+    "@authenta/react-native": "1.0.2",
     "react": "18.2.0",
     "react-native": "0.74.5",
     "react-native-image-picker": "^7.1.0",
