@@ -1,9 +1,9 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  AUTHENTA CORE SDK  ·  FI-1 Model  ·  FACE SIMILARITY CHECK
+//  AUTHENTA CORE SDK  ·  FE-1 Model  ·  FACEEMBEDDINGS
 //  Every function in the SDK demonstrated one by one.
 //
 //  HOW TO RUN THIS FILE
-//    npx ts-node examples/core/03-face-similarity-check.ts
+//    npx ts-node examples/core/04-face-embeddings.ts
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━══
 
 import { AuthentaClient } from '@authenta/core';
@@ -52,23 +52,18 @@ async function demonstrateUploadAndPoll(): Promise<void> {
 
   const processedMedia = await client.uploadAndPoll(
     'file:///path/to/selfie.jpg',
-    'FI-1',
-    {
-      faceSimilarityCheck: true,     // ← only flag needed for this check
-    },
+    'FE-1',
   );
 
   console.log('mid:           ', processedMedia.mid);
   console.log('status:        ', processedMedia.status);
-  console.log('isSimilar:     ', processedMedia.result?.isSimilar);
-  console.log('SimilarityScore:', processedMedia.result?.similarityScore);
+  console.log('faceVector:    ', processedMedia.result?.faceVector);
 
   //  ─── OUTPUT ───────────────────────────────────────────────────────────────
   //
   //  mid:            "64a3f1c2b8e9d07f3c1a5e22"
   //  status:         "PROCESSED"
-  //  isSimilar:     true
-  //  SimilarityScore: 0.95
+  //  faceVector:     [0.1, 0.2, 0.3, ...]
   //
   //  ─── WHAT THIS MEANS ──────────────────────────────────────────────────────
   //
@@ -77,23 +72,22 @@ async function demonstrateUploadAndPoll(): Promise<void> {
 }
 
 
-// Alternative approach: use the function verify_faceSimilarity() which is a shortcut for uploadAndPoll() with faceSimilarityCheck: true. It returns a boolean directly instead of the full media record.
+// Alternative approach: use the function verify_face_embeddings() which is a shortcut for uploadAndPoll() with FE-1 modeltype.
 
-async function demonstrateVerifyFaceSimilarity(): Promise<void> {
-  console.log('\n━━ verifyFaceSimilarity() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+async function demonstrate_verify_face_embeddings(): Promise<void> {
+  console.log('\n━━ verifyFaceEmbeddings() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  const isSimilar = await client.verify_similarity('file:///path/to/selfie.jpg');
+  const face_embeddings = await client.verify_face_embeddings('file:///path/to/selfie.jpg');
 
-  console.log('Result:    ', isSimilar);
+  console.log('Result:    ', face_embeddings);
 
   //  ─── OUTPUT ───────────────────────────────────────────────────────────────
   //
-  //  isSimilar:     true
-  //  SimilarityScore: 0.95
+  //  faceVector:     [0.1, 0.2, 0.3, ...]
   //
   //  ─── WHAT THIS MEANS ──────────────────────────────────────────────────────
   //
-  //  This is a simpler alternative to uploadAndPoll() if you only care about face similarity. It returns true/false directly.
+  //  This is a simpler alternative to uploadAndPoll() if you only care about face embeddings. It returns the face vector directly.
 }
 
 

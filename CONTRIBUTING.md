@@ -62,11 +62,9 @@ Always build `@authenta/core` before `@authenta/react-native` — the react-nati
 
 ```bash
 # Build both in the correct order
-npm run build
-
-# Or individually
-npm run build --workspace=packages/core
-npm run build --workspace=packages/react-native
+cd /Volumes/Software/authenta-reactnative-sdk
+cd packages/core && npm run build
+cd ../react-native && npm run build
 ```
 
 Compiled output goes to `packages/*/dist/`. These folders are git-ignored.
@@ -77,11 +75,8 @@ Compiled output goes to `packages/*/dist/`. These folders are git-ignored.
 
 ```bash
 # Run all workspaces
-npm test --workspaces
-
-# Run a specific package
-npm test --workspace=packages/core
-npm test --workspace=packages/react-native
+cd packages/core && npm test -- --detectOpenHandles 2>&1 | tail -80
+cd ../react-native && npm test -- --detectOpenHandles 2>&1 | tail -80
 ```
 
 The `packages/core/__tests__/client.test.ts` file is a manual integration test that hits the real Authenta API. It requires valid credentials set as environment variables:
@@ -174,13 +169,13 @@ authenta-reactnative-sdk/
 2. Make your changes in `packages/core/src/` or `packages/react-native/src/`.
 3. Rebuild the affected package:
    ```bash
-   npm run build --workspace=packages/core
+   cd packages/core && npm run build 
    # and/or
-   npm run build --workspace=packages/react-native
+   cd packages/react-native && npm run build
    ```
 4. Run the tests:
    ```bash
-   npm test --workspaces
+   cd packages/core && npm test -- --detectOpenHandles 2>&1 | tail -80
    ```
 5. If you changed the public API, update the relevant README (`packages/core/README.md` or `packages/react-native/README.md`).
 
@@ -252,8 +247,8 @@ npm run build
 ### 3. Dry run
 
 ```bash
-npm publish --workspace=packages/core --access public --dry-run
-npm publish --workspace=packages/react-native --access public --dry-run
+cd packages/core && npm publish  --access public --dry-run
+cd packages/react-native && npm publish  --access public --dry-run
 ```
 
 Verify only `dist/` files appear — no `src/`, `__tests__/`, or secrets.
@@ -263,8 +258,8 @@ Verify only `dist/` files appear — no `src/`, `__tests__/`, or secrets.
 ```bash
 npm login   # if not already logged in
 
-npm publish --workspace=packages/core --access public
-npm publish --workspace=packages/react-native --access public
+cd packages/core && npm publish  --access public
+cd packages/react-native && npm publish  --access public
 ```
 
 ### 5. Verify

@@ -204,11 +204,19 @@ async function main() {
   console.log('\n✓ All selected tests completed.\n');
 }
 
-main().catch(err => {
-  if (err instanceof AuthentaError) {
-    console.error(`\n[${err.name}] ${err.message} (code=${err.code}, status=${err.statusCode})`);
-  } else {
-    console.error('\n', err);
-  }
-  process.exit(1);
-});
+if (typeof describe === 'function' && typeof it === 'function') {
+  describe('Manual Integration', () => {
+    it('runs end-to-end against the live API', async () => {
+      await main();
+    }, 600_000);
+  });
+} else {
+  main().catch(err => {
+    if (err instanceof AuthentaError) {
+      console.error(`\n[${err.name}] ${err.message} (code=${err.code}, status=${err.statusCode})`);
+    } else {
+      console.error('\n', err);
+    }
+    process.exit(1);
+  });
+}

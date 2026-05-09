@@ -1,4 +1,18 @@
+pluginManagement {
+	includeBuild("../node_modules/@react-native/gradle-plugin")
+}
+
+plugins {
+	id("com.facebook.react.settings")
+}
+
+// Needed so buildscript classpath can resolve `com.facebook.react:react-native-gradle-plugin`
+// from the local included build instead of Maven.
+includeBuild("../node_modules/@react-native/gradle-plugin")
+
+reactSettings {
+	autolinkLibrariesFromCommand()
+}
+
 rootProject.name = 'AuthentaDemo'
-apply from: file("../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesSettingsGradle(settings)
 include ':app'
-includeBuild('../node_modules/@react-native/gradle-plugin')

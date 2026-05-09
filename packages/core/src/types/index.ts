@@ -79,6 +79,7 @@ export interface DetectionResult {
   similarityScore?: string | number;
   identityPredictions?: IdentityPrediction[];
   boundingBoxes?: BoundingBoxesMap;
+  faceVector?: number[];
   [key: string]: any;
 }
 

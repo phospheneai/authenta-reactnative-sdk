@@ -2,10 +2,10 @@ package com.authentademo
 
 import android.app.Application
 import com.facebook.react.PackageList
-import com.facebook.react.ReactNativeHost
 import com.facebook.react.ReactPackage
+import com.facebook.react.defaults.DefaultReactNativeHost
 
-class MainApplicationReactNativeHost(application: Application) : ReactNativeHost(application) {
+class MainApplicationReactNativeHost(application: Application) : DefaultReactNativeHost(application) {
 
   override fun getPackages(): List<ReactPackage> {
     return PackageList(this).packages

@@ -26,6 +26,9 @@ import {
   View,
 } from 'react-native';
 
+// Force Metro to bundle react-native-blob-util so the SDK can resolve it at runtime.
+import 'react-native-blob-util';
+
 // ─── Import ONLY these two things from the SDK ──────────────────────────────
 import { AuthentaClient } from '@authenta/core';
 import type { ProcessedMedia } from '@authenta/core';

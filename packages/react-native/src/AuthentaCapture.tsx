@@ -6,11 +6,11 @@
  * result via the onResult callback.
  *
  * Peer dependencies required in the host app:
- *   react-native-vision-camera >= 4
+ *   react-native-vision-camera >= 5
  *   react-native-image-picker  >= 7  (for the reference image picker)
  */
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -23,8 +23,15 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Camera, useCameraDevice, useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera';
-import type { PhotoFile, VideoFile } from 'react-native-vision-camera';
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  useMicrophonePermission,
+  usePhotoOutput,
+  useVideoOutput,
+} from 'react-native-vision-camera';
+import type { CameraOutput, CameraRef, Recorder } from 'react-native-vision-camera';
 import { launchImageLibrary } from 'react-native-image-picker';
 
 import { AuthentaClient, AuthentaError, ValidationError } from '@authenta/core';
@@ -82,6 +89,13 @@ function resolveCaptureMode(
   return 'photo';                             // fallback (validation prevents this)
 }
 
+function asFileUri(path: string): string {
+  const trimmed = path.trim();
+  const uri = trimmed.startsWith('file://') ? trimmed : `file://${trimmed}`;
+  console.log('[AuthentaCapture] asFileUri raw path:', JSON.stringify(path), '-> uri:', JSON.stringify(uri));
+  return uri;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AuthentaCapture({
@@ -106,6 +120,7 @@ export function AuthentaCapture({
   const [captureMode, setCaptureMode]     = useState<CaptureMode>('photo');
   const [referenceUri, setReferenceUri]   = useState<string | undefined>();
   const [isRecording, setIsRecording]     = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const [lastResult, setLastResult]       = useState<ProcessedMedia | undefined>();
   const [lastError, setLastError]         = useState<Error | AuthentaError | undefined>();
   const retryCount                        = useRef(0);
@@ -115,8 +130,19 @@ export function AuthentaCapture({
   const device = useCameraDevice(cameraPosition);
   const { hasPermission: hasCamPermission, requestPermission: requestCamPermission } = useCameraPermission();
   const { hasPermission: hasMicPermission, requestPermission: requestMicPermission } = useMicrophonePermission();
-  const cameraRef     = useRef<Camera>(null);
+  const cameraRef     = useRef<CameraRef>(null);
+  const photoOutput   = usePhotoOutput();
+  const videoOutput   = useVideoOutput({ enableAudio: true, fileType: 'mp4' });
+  const recorderRef   = useRef<Recorder | undefined>(undefined);
+  const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isRecordingRef = useRef(false); // mirror of isRecording for async callbacks
+
+  const cameraOutputs = useMemo<CameraOutput[]>(() => {
+    const outputs: CameraOutput[] = [];
+    if (captureMode === 'photo' || captureMode === 'both') outputs.push(photoOutput);
+    if (captureMode === 'video' || captureMode === 'both') outputs.push(videoOutput);
+    return outputs;
+  }, [captureMode, photoOutput, videoOutput]);
 
   // ── Reset modal to initial state ────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -127,7 +153,13 @@ export function AuthentaCapture({
     setCameraPosition('front');
     setReferenceUri(undefined);
     setIsRecording(false);
+    setIsCameraReady(false);
     isRecordingRef.current = false;
+    recorderRef.current = undefined;
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = undefined;
+    }
     setLastResult(undefined);
     setLastError(undefined);
     retryCount.current = 0;
@@ -138,12 +170,28 @@ export function AuthentaCapture({
     if (visible) reset();
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  React.useEffect(() => {
+    if (step !== 'camera') {
+      setIsCameraReady(false);
+    }
+  }, [step]);
+
+  React.useEffect(() => {
+    setIsCameraReady(false);
+  }, [cameraPosition, captureMode]);
+
   // ── Error handler ────────────────────────────────────────────────────────────
   const handleError = useCallback((err: Error | AuthentaError) => {
     retryCount.current += 1;
     setLastError(err);
     setIsRecording(false);
+    setIsCameraReady(false);
     isRecordingRef.current = false;
+    recorderRef.current = undefined;
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = undefined;
+    }
     setStep('error');
     onError?.(err);
   }, [onError]);
@@ -253,46 +301,87 @@ export function AuthentaCapture({
   }, [client, modelType, liveness, faceswap, similarity, referenceUri, onResult, handleError]);
 
   const handleTakePhoto = useCallback(async () => {
-    if (!cameraRef.current) return;
+    if (!isCameraReady) {
+      handleError(new AuthentaError('Camera is still starting. Please try again in a moment.'));
+      return;
+    }
     try {
-      const photo: PhotoFile = await cameraRef.current.takePhoto();
-      await runProcessing(`file://${photo.path}`);
+      const photo = await photoOutput.capturePhotoToFile(
+        { flashMode: 'off', enableShutterSound: true },
+        {},
+      );
+      await runProcessing(asFileUri(photo.filePath));
     } catch (err) {
       handleError(err instanceof Error ? err : new AuthentaError(String(err)));
     }
-  }, [runProcessing, handleError]);
+  }, [isCameraReady, photoOutput, runProcessing, handleError]);
 
-  const handleStopRecording = useCallback(() => {
-    if (isRecordingRef.current) {
-      cameraRef.current?.stopRecording();
-      isRecordingRef.current = false;
-      setIsRecording(false);
+  const handleStopRecording = useCallback(async () => {
+    if (!isRecordingRef.current) return;
+
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = undefined;
     }
+
+    const recorder = recorderRef.current;
+    isRecordingRef.current = false;
+    setIsRecording(false);
+
+    if (!recorder) return;
+
+    try {
+      await recorder.stopRecording();
+    } catch (err) {
+      recorderRef.current = undefined;
+      handleError(err instanceof Error ? err : new AuthentaError(String(err)));
+    }
+  }, [handleError]);
+
+  const clearRecordingState = useCallback(() => {
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = undefined;
+    }
+    recorderRef.current = undefined;
+    isRecordingRef.current = false;
+    setIsRecording(false);
   }, []);
 
-  const handleStartRecording = useCallback(() => {
-    if (!cameraRef.current || isRecordingRef.current) return;
-    setIsRecording(true);
-    isRecordingRef.current = true;
+  const handleStartRecording = useCallback(async () => {
+    if (isRecordingRef.current) return;
+    if (!isCameraReady) {
+      handleError(new AuthentaError('Camera is still starting. Please try again in a moment.'));
+      return;
+    }
 
-    cameraRef.current.startRecording({
-      onRecordingFinished: async (video: VideoFile) => {
-        isRecordingRef.current = false;
-        setIsRecording(false);
-        await runProcessing(`file://${video.path}`);
-      },
-      onRecordingError: (err) => {
-        isRecordingRef.current = false;
-        setIsRecording(false);
-        handleError(new AuthentaError(err.message ?? 'Recording failed'));
-      },
-    });
+    try {
+      const recorder = await videoOutput.createRecorder({
+        maxDuration: VIDEO_MAX_DURATION_MS / 1000,
+      });
+      recorderRef.current = recorder;
 
-    // Auto-stop after max duration
-    setTimeout(() => {
-      handleStopRecording();
-    }, VIDEO_MAX_DURATION_MS);
-  }, [runProcessing, handleError, handleStopRecording]);
+      await recorder.startRecording(
+        async (filePath) => {
+          clearRecordingState();
+          await runProcessing(asFileUri(filePath));
+        },
+        (err) => {
+          clearRecordingState();
+          handleError(new AuthentaError(err.message ?? 'Recording failed'));
+        },
+      );
+
+      isRecordingRef.current = true;
+      setIsRecording(true);
+      recordingTimeoutRef.current = setTimeout(() => {
+        void handleStopRecording();
+      }, VIDEO_MAX_DURATION_MS + 250);
+    } catch (err) {
+      clearRecordingState();
+      handleError(err instanceof Error ? err : new AuthentaError(String(err)));
+    }
+  }, [isCameraReady, videoOutput, runProcessing, handleError, handleStopRecording, clearRecordingState]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // STEP: retry / close
@@ -300,14 +389,25 @@ export function AuthentaCapture({
 
   const handleRetry = useCallback(() => {
     setLastError(undefined);
+    setIsCameraReady(false);
     setStep('camera');
   }, []);
 
   const handleClose = useCallback(() => {
-    handleStopRecording();
+    void handleStopRecording();
     reset();
     onClose();
   }, [handleStopRecording, reset, onClose]);
+
+  const handleCameraBack = useCallback(() => {
+    void handleStopRecording();
+    setStep(similarity ? 'reference' : 'toggles');
+  }, [handleStopRecording, similarity]);
+
+  const handleSwitchCamera = useCallback(() => {
+    setIsCameraReady(false);
+    setCameraPosition(p => p === 'front' ? 'back' : 'front');
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Render helpers
@@ -431,7 +531,7 @@ export function AuthentaCapture({
           </Text>
           <TouchableOpacity
             style={s.secondaryBtn}
-            onPress={() => setCameraPosition(p => p === 'front' ? 'back' : 'front')}
+            onPress={handleSwitchCamera}
           >
             <Text style={s.secondaryBtnText}>Switch Camera</Text>
           </TouchableOpacity>
@@ -449,17 +549,19 @@ export function AuthentaCapture({
           style={StyleSheet.absoluteFill}
           device={device}
           isActive={step === 'camera'}
-          photo={captureMode === 'photo' || captureMode === 'both'}
-          video={captureMode === 'video' || captureMode === 'both'}
-          audio={captureMode === 'video' || captureMode === 'both'}
+          outputs={cameraOutputs}
+          onStarted={() => setIsCameraReady(true)}
+          onStopped={() => setIsCameraReady(false)}
+          onError={(err) => handleError(err instanceof Error ? err : new AuthentaError(String(err)))}
         />
 
         {/* Top overlay */}
         <SafeAreaView style={s.cameraTopOverlay}>
           <TouchableOpacity
-            onPress={() => setStep(similarity ? 'reference' : 'toggles')}
-            style={s.cameraBackBtn}
+            onPress={handleCameraBack}
+            style={[s.cameraBackBtn, isRecording && s.cameraFlipBtnDisabled]}
             hitSlop={HIT_SLOP}
+            disabled={isRecording}
           >
             <Text style={s.cameraBackBtnText}>← Back</Text>
           </TouchableOpacity>
@@ -471,7 +573,7 @@ export function AuthentaCapture({
             </Text>
           </View>
           <TouchableOpacity
-            onPress={() => setCameraPosition(p => p === 'front' ? 'back' : 'front')}
+            onPress={handleSwitchCamera}
             style={[s.cameraFlipBtn, isRecording && s.cameraFlipBtnDisabled]}
             hitSlop={HIT_SLOP}
             disabled={isRecording}
@@ -488,6 +590,8 @@ export function AuthentaCapture({
           <Text style={s.cameraHint}>
             {isRecording
               ? 'Recording… tap ■ to stop'
+              : !isCameraReady
+                ? 'Camera is starting…'
               : captureMode === 'video'
                 ? 'Position your face and tap ● to record'
                 : captureMode === 'both'
@@ -499,7 +603,11 @@ export function AuthentaCapture({
             {/* Photo button — shown for photo-only or both */}
             {(captureMode === 'photo' || captureMode === 'both') && !isRecording && (
               <View style={s.captureBtnWrapper}>
-                <TouchableOpacity style={s.captureBtn} onPress={handleTakePhoto}>
+                <TouchableOpacity
+                  style={[s.captureBtn, !isCameraReady && s.captureBtnDisabled]}
+                  onPress={handleTakePhoto}
+                  disabled={!isCameraReady}
+                >
                   <View style={s.captureBtnDot} />
                 </TouchableOpacity>
                 {captureMode === 'both' && (
@@ -511,7 +619,11 @@ export function AuthentaCapture({
             {/* Record button — shown for video-only or both (when not recording) */}
             {(captureMode === 'video' || captureMode === 'both') && !isRecording && (
               <View style={s.captureBtnWrapper}>
-                <TouchableOpacity style={[s.captureBtn, s.recordBtn]} onPress={handleStartRecording}>
+                <TouchableOpacity
+                  style={[s.captureBtn, s.recordBtn, !isCameraReady && s.captureBtnDisabled]}
+                  onPress={handleStartRecording}
+                  disabled={!isCameraReady}
+                >
                   <View style={[s.captureBtnDot, s.recordBtnDot]} />
                 </TouchableOpacity>
                 {captureMode === 'both' && (
@@ -805,6 +917,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  captureBtnDisabled: { opacity: 0.45 },
   captureBtnDot:  { width: 54, height: 54, borderRadius: 27, backgroundColor: '#fff' },
   recordBtn:      { borderColor: '#ef4444' },
   recordBtnDot:   { backgroundColor: '#ef4444' },
