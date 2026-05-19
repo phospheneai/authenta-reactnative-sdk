@@ -7,9 +7,13 @@
     "ios": "react-native run-ios",
     "start": "react-native start",
     "test": "jest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "bundle:android": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res",
+    "apk:debug": "npm run bundle:android && cd android && ./gradlew assembleDebug",
+    "apk:release": "npm run bundle:android && cd android && ./gradlew assembleRelease"
   },
   "dependencies": {
+    "@authenta/core": "^1.0.4",
     "@authenta/react-native": "^1.0.4",
     "react": "19.1.1",
     "react-native": "0.82.0",
