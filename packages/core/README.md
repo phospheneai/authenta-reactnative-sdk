@@ -15,7 +15,8 @@ Use this package directly if you want headless control over uploads, polling, an
   - [uploadAndPoll()](#uploadandpoll)
   - [RunOptions](#runoptions)
   - [Low-level API](#low-level-api)
-- [Models](#models)
+  - [Convenience Methods](#convenience-methods)
+- [Task Types](#task-types)
 - [Error Handling](#error-handling)
 - [TypeScript Types](#typescript-types)
 
@@ -37,12 +38,11 @@ No peer dependencies. Works out of the box in Node.js >= 16 and React Native >= 
 import { AuthentaClient } from '@authenta/core';
 
 const client = new AuthentaClient({
-  clientId:     'YOUR_CLIENT_ID',
-  clientSecret: 'YOUR_CLIENT_SECRET',
+  apiKey: 'api_xxxxxxxx',
 });
 
-const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
-  livenessCheck: true,
+const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', '8', {
+  isLivenessCheck: true,
 });
 
 console.log(result.result?.isLiveness);   // true | false
@@ -57,26 +57,29 @@ console.log(result.status);               // "PROCESSED"
 
 ```ts
 const client = new AuthentaClient({
-  clientId:     'YOUR_CLIENT_ID',       // required
-  clientSecret: 'YOUR_CLIENT_SECRET',   // required
-  baseUrl:      'https://platform.authenta.ai', // optional — default shown
+  apiKey:   'api_xxxxxxxx',                       // required
+  baseUrl:  'https://platform.authenta.ai',       // optional — default shown
 });
 ```
 
 | Option | Type | Required | Description |
 |---|---|---|---|
-| `clientId` | `string` | Yes | Your Authenta client ID |
-| `clientSecret` | `string` | Yes | Your Authenta client secret |
+| `apiKey` | `string` | Yes | Your Authenta API key (`api_...`) |
 | `baseUrl` | `string` | No | API base URL (default: `https://platform.authenta.ai`) |
+
+All requests are authenticated with:
+```http
+Authorization: Bearer api_xxxxxxxx
+```
 
 ---
 
 ### uploadAndPoll()
 
-The primary high-level method. Uploads the file, polls until processing is complete, fetches the detection result, and returns a `ProcessedMedia` object.
+The primary high-level method. Uploads the file, finalizes the job, polls until processing is complete, fetches the detection result, and returns a `ProcessedJob` object.
 
 ```ts
-const result = await client.uploadAndPoll(uri, modelType, options);
+const result = await client.uploadAndPoll(uri, taskTypeId, options);
 ```
 
 **Parameters**
@@ -84,52 +87,53 @@ const result = await client.uploadAndPoll(uri, modelType, options);
 | Parameter | Type | Description |
 |---|---|---|
 | `uri` | `string` | `file://` URI of the photo or video to analyse |
-| `modelType` | `ModelType` | Model to run (e.g. `'FI-1'`) |
+| `taskTypeId` | `TaskTypeId` | Task to run — see [Task Types](#task-types) |
 | `options` | `RunOptions` | Detection options — see [RunOptions](#runoptions) |
 
 **Examples**
 
 ```ts
-// Liveness check — photo
-const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
-  livenessCheck: true,
+// Liveness check — photo (taskTypeId 8, face-intelligence)
+const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', '8', {
+  isLivenessCheck: true,
 });
 
-// Faceswap check — video
-const result = await client.uploadAndPoll('file:///path/to/clip.mp4', 'FI-1', {
-  faceswapCheck: true,
+// Faceswap check — video (taskTypeId 8)
+const result = await client.uploadAndPoll('file:///path/to/clip.mp4', '8', {
+  isFaceswapCheck: true,
 });
 
 // Liveness + faceswap — video
-const result = await client.uploadAndPoll('file:///path/to/clip.mp4', 'FI-1', {
-  livenessCheck: true,
-  faceswapCheck: true,
+const result = await client.uploadAndPoll('file:///path/to/clip.mp4', '8', {
+  isLivenessCheck: true,
+  isFaceswapCheck: true,
 });
 
 // Face similarity — photo + reference
-const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
-  faceSimilarityCheck: true,
+const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', '8', {
+  isSimilarityCheck: true,
   referenceImage: 'file:///path/to/id-photo.jpg',
 });
 
-// Liveness + face similarity — photo
-const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
-  livenessCheck: true,
-  faceSimilarityCheck: true,
-  referenceImage: 'file:///path/to/id-photo.jpg',
-});
+// AI image detection (taskTypeId 1)
+const result = await client.uploadAndPoll('file:///path/to/image.jpg', '1');
+
+// Faceswap video detection (taskTypeId 4)
+const result = await client.uploadAndPoll('file:///path/to/video.mp4', '4');
+
+// Face embeddings (taskTypeId 9)
+const result = await client.uploadAndPoll('file:///path/to/face.jpg', '9');
 ```
 
-**Returns** `Promise<ProcessedMedia>`
+**Returns** `Promise<ProcessedJob>`
 
 ```ts
 {
-  mid:         string;       // unique media ID
-  name:        string;
+  id:          string;       // unique job ID
   status:      'PROCESSED';  // always PROCESSED on success
-  modelType:   string;       // e.g. "FI-1"
+  taskTypeId:  string;       // e.g. "8"
   contentType: string;       // MIME type of the uploaded file
-  size:        number;       // file size in bytes
+  sizeBytes:   number;       // file size in bytes
   createdAt:   string;       // ISO 8601
   srcURL?:     string;
   resultURL?:  string;
@@ -150,23 +154,22 @@ const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', 
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `livenessCheck` | `boolean` | `false` | Run liveness check (FI-1) |
-| `faceswapCheck` | `boolean` | `false` | Run faceswap / deepfake check (FI-1, video required) |
-| `faceSimilarityCheck` | `boolean` | `false` | Run face similarity check (FI-1, photo + reference required) |
-| `referenceImage` | `string` | — | `file://` URI of reference face image (required when `faceSimilarityCheck: true`) |
-| `isSingleFace` | `boolean` | `true` | Hint that only one face is present |
+| `isLivenessCheck` | `boolean` | `false` | Run liveness check (taskTypeId `'8'`) |
+| `isFaceswapCheck` | `boolean` | `false` | Run faceswap check (taskTypeId `'8'`, video required) |
+| `isSimilarityCheck` | `boolean` | `false` | Run face similarity check (taskTypeId `'8'`, photo + reference required) |
+| `referenceImage` | `string` | — | `file://` URI of reference face image (required when `isSimilarityCheck: true`) |
 | `autoPolling` | `boolean` | `true` | Wait for result before returning. Set `false` to return immediately after upload |
 | `interval` | `number` | `5000` | Polling interval in milliseconds |
 | `timeout` | `number` | `600000` | Max polling duration in milliseconds (10 min) |
 
-**Check compatibility**
+**Check compatibility (taskTypeId `'8'` only)**
 
 | Check | Input required | Can combine with |
 |---|---|---|
-| `livenessCheck` | Photo **or** video | `faceSimilarityCheck` |
-| `faceswapCheck` | Video (max 10 s) | `livenessCheck` |
-| `faceSimilarityCheck` | Photo + `referenceImage` | `livenessCheck` |
-| `faceswapCheck` + `faceSimilarityCheck` | — | **Not allowed** |
+| `isLivenessCheck` | Photo **or** video | `isSimilarityCheck` |
+| `isFaceswapCheck` | Video (max 10 s) | `isLivenessCheck` |
+| `isSimilarityCheck` | Photo + `referenceImage` | `isLivenessCheck` |
+| `isFaceswapCheck` + `isSimilarityCheck` | — | **Not allowed** |
 
 ---
 
@@ -175,14 +178,14 @@ const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', 
 Call each step individually for full control:
 
 ```ts
-// 1. Upload — creates a media record and uploads the file to S3
-const media = await client.upload('file:///path/to/selfie.jpg', 'FI-1', {
-  livenessCheck: true,
+// 1. Create job + upload file(s) to S3 + finalize (sends to queue)
+const job = await client.upload('file:///path/to/selfie.jpg', '8', {
+  isLivenessCheck: true,
 });
-console.log(media.mid); // "abc-123"
+console.log(job.id); // "469"
 
 // 2. Poll until processing completes
-const processed = await client.pollResult(media.mid, {
+const processed = await client.pollResult(job.id, {
   interval: 3000,    // poll every 3 s
   timeout:  120000,  // give up after 2 min
 });
@@ -192,18 +195,56 @@ const result = await client.getResult(processed);
 console.log(result.isLiveness, result.isDeepFake);
 
 // CRUD helpers
-const record = await client.getMedia(mid);
-const list   = await client.listMedia({ page: 1, pageSize: 20 });
-await client.deleteMedia(mid);
+const record = await client.getJob(id);
+const list   = await client.listJobs({ page: 1, pageSize: 20 });
+await client.deleteJob(id);
+await client.finalizeJob(id);  // manually finalize if autoPolling is false
 ```
 
 ---
 
-## Models
+### Convenience Methods
 
-| Model ID | Description | Input |
-|---|---|---|
-| `FI-1` | Face Intelligence — liveness, faceswap, face similarity | Photo or video |
+Pre-wired shortcuts that pick the correct task type automatically:
+
+```ts
+// Faceswap detection — taskTypeId 4, video only
+const result = await client.verify_deepfake('file:///path/to/video.mp4');
+
+// Liveness check — taskTypeId 8, image or video
+const result = await client.verify_liveness('file:///path/to/selfie.jpg');
+
+// Face similarity — taskTypeId 8, image + reference
+const result = await client.verify_similarity(
+  'file:///path/to/selfie.jpg',
+  'file:///path/to/id-photo.jpg',
+);
+
+// Face embeddings — taskTypeId 9, image
+const result = await client.verify_face_embeddings('file:///path/to/face.jpg');
+```
+
+---
+
+## Task Types
+
+| TaskTypeId | Slug | Description | Accepted input |
+|---|---|---|---|
+| `'1'` | ai-image-detection | Detects if an image is AI-generated | `image/jpeg`, `image/png` |
+| `'4'` | faceswap-detection | Detects AI face-swap in video | `video/mp4`, `video/mov`, `video/webm` |
+| `'8'` | face-intelligence | Liveness, faceswap, and similarity checks | `image/jpeg`, `image/png`, `video/mp4`, `video/mov` |
+| `'9'` | face-embeddings | Extracts face embedding vector | `image/jpeg`, `image/png` |
+
+Named constants are also exported:
+
+```ts
+import { TASK_TYPE } from '@authenta/core';
+
+TASK_TYPE.AI_IMAGE_DETECTION   // '1'
+TASK_TYPE.FACESWAP_DETECTION   // '4'
+TASK_TYPE.FACE_INTELLIGENCE    // '8'
+TASK_TYPE.FACE_EMBEDDINGS      // '9'
+```
 
 ---
 
@@ -216,23 +257,20 @@ import {
   AuthentaError,
   AuthenticationError,
   AuthorizationError,
-  QuotaExceededError,
-  InsufficientCreditsError,
+  InsufficientBalanceError,
   ValidationError,
   ServerError,
 } from '@authenta/core';
 
 try {
-  const result = await client.uploadAndPoll(uri, 'FI-1', { livenessCheck: true });
+  const result = await client.uploadAndPoll(uri, '8', { isLivenessCheck: true });
 } catch (err) {
   if (err instanceof AuthenticationError) {
-    // Invalid clientId / clientSecret — check your credentials
+    // Invalid or missing API key — code: INVALID_API_KEY
   } else if (err instanceof AuthorizationError) {
-    // Account lacks permission for this operation
-  } else if (err instanceof QuotaExceededError) {
-    // Monthly quota exceeded
-  } else if (err instanceof InsufficientCreditsError) {
-    // No remaining credits
+    // Key lacks permission for this operation — code: FORBIDDEN
+  } else if (err instanceof InsufficientBalanceError) {
+    // Account has no credits — code: INSUFFICIENT_BALANCE
   } else if (err instanceof ValidationError) {
     // Bad input — see err.message for details
     console.error(err.message, err.code, err.statusCode);
@@ -250,7 +288,7 @@ try {
 | Property | Type | Description |
 |---|---|---|
 | `message` | `string` | Human-readable description |
-| `code` | `string?` | API error code (e.g. `IAM001`) |
+| `code` | `string?` | API error code (`INVALID_API_KEY`, `FORBIDDEN`, `INSUFFICIENT_BALANCE`) |
 | `statusCode` | `number?` | HTTP status code |
 | `details` | `object?` | Raw API response body |
 
@@ -263,19 +301,22 @@ All public types are exported from the package entry point:
 ```ts
 import type {
   AuthentaClientConfig,
-  ModelType,
-  MediaStatus,
+  TaskTypeId,
+  JobStatus,
   FileInfo,
+  JobInput,
+  JobParameters,
   FIOptions,
   RunOptions,
   PollingOptions,
-  CreateMediaResponse,
-  MediaRecord,
-  ListMediaResponse,
+  CreateJobResponse,
+  JobRecord,
+  ListJobsResponse,
   DetectionResult,
-  ProcessedMedia,
+  ProcessedJob,
 } from '@authenta/core';
 ```
+
 ---
 
 ## License
