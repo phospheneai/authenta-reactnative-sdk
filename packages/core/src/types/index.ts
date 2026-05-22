@@ -1,7 +1,13 @@
-// Supported model types (extensible with string & {})
-export type ModelType = 'DF-1' | 'AC-1' | 'FI-1' | (string & {});
+export type TaskTypeId = '1' | '4' | '8' | '9' | (string & {});
 
-export type MediaStatus = 'PENDING' | 'PROCESSING' | 'PROCESSED' | 'FAILED' | 'ERROR';
+export const TASK_TYPE = {
+  AI_IMAGE_DETECTION:    '1',
+  FACESWAP_DETECTION:    '4',
+  FACE_INTELLIGENCE:     '8',
+  FACE_EMBEDDINGS:       '9',
+} as const;
+
+export type JobStatus = 'PENDING' | 'PROCESSING' | 'PROCESSED' | 'FAILED' | 'ERROR';
 
 // React Native file descriptor — matches output from image/document pickers
 export interface FileInfo {
@@ -11,13 +17,27 @@ export interface FileInfo {
   size: number;  // file size in bytes
 }
 
-// FI-1 model options
+// Per-slot input descriptor sent in POST /api/v1/jobs body
+export interface JobInput {
+  slotName: string;      // e.g. "original", "reference"
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
+// Optional parameters for taskTypeId "8" (face-intelligence)
+export interface JobParameters {
+  isFaceswapCheck?: boolean;
+  isLivenessCheck?: boolean;
+  isSimilarityCheck?: boolean;
+}
+
+// Face-intelligence check options (used by uploadAndPoll / convenience methods)
 export interface FIOptions {
-  isSingleFace?: boolean;
-  faceswapCheck?: boolean;       // video only
-  livenessCheck?: boolean;
-  faceSimilarityCheck?: boolean; // image only — requires referenceImage
-  referenceImage?: string;       // file URI of the reference image
+  isFaceswapCheck?: boolean;    // video only
+  isLivenessCheck?: boolean;
+  isSimilarityCheck?: boolean;  // image only — requires referenceImage
+  referenceImage?: string;      // file URI of the reference image
 }
 
 export interface PollingOptions {
@@ -25,45 +45,47 @@ export interface PollingOptions {
   timeout?: number;  // ms total timeout, default 600000
 }
 
-// Options for uploadAndPoll() — FI-1 fields are validated and used only when modelType is "FI-1"
+// Options for uploadAndPoll() — FI fields are validated and used only when taskTypeId is "8"
 export interface RunOptions extends FIOptions, PollingOptions {
   autoPolling?: boolean; // default true — wait for result before returning
 }
 
-// POST /api/media response
-export interface CreateMediaResponse {
-  mid: string;
-  name: string;
-  status: MediaStatus;
-  modelType: string;
-  contentType: string;
-  size: number;
-  createdAt: string;
+// POST /api/v1/jobs response — contains per-slot upload URLs
+export interface JobSlotUpload {
+  slotName: string;
   uploadUrl: string;
-  referenceUploadUrl?: string;
 }
 
-// GET /api/media/{mid} response
-export interface MediaRecord {
-  mid: string;
-  name: string;
-  status: MediaStatus;
-  modelType: string;
+export interface CreateJobResponse {
+  id: string;
+  status: JobStatus;
+  taskTypeId: string;
   contentType: string;
-  size: number;
+  sizeBytes: number;
+  createdAt: string;
+  inputs: JobSlotUpload[];
+}
+
+// GET /api/v1/jobs/{id} response
+export interface JobRecord {
+  id: string;
+  status: JobStatus;
+  taskTypeId: string;
+  contentType: string;
+  sizeBytes: number;
   createdAt: string;
   srcURL?: string;
   resultURL?: string;
 }
 
-export interface ListMediaParams {
+export interface ListJobsParams {
   page?: number;
   pageSize?: number;
   [key: string]: any;
 }
 
-export interface ListMediaResponse {
-  items: MediaRecord[];
+export interface ListJobsResponse {
+  items: JobRecord[];
   total?: number;
   page?: number;
   pageSize?: number;
@@ -105,6 +127,6 @@ export interface BoundingBoxesMap {
 }
 
 // Returned by uploadAndPoll() after polling completes
-export interface ProcessedMedia extends MediaRecord {
+export interface ProcessedJob extends JobRecord {
   result?: DetectionResult;
 }

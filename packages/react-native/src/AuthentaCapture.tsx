@@ -2,7 +2,7 @@
  * AuthentaCapture — self-contained modal UI for eKYC face capture.
  *
  * Uses react-native-vision-camera for live camera access, then passes the
- * captured URI straight to AuthentaClient.uploadAndPoll() and returns a ProcessedMedia
+ * captured URI straight to AuthentaClient.uploadAndPoll() and returns a ProcessedJob
  * result via the onResult callback.
  *
  * Peer dependencies required in the host app:
@@ -35,21 +35,21 @@ import type { CameraOutput, CameraRef, Recorder } from 'react-native-vision-came
 import { launchImageLibrary } from 'react-native-image-picker';
 
 import { AuthentaClient, AuthentaError, ValidationError } from '@authenta/core';
-import type { ModelType, ProcessedMedia } from '@authenta/core';
+import type { TaskTypeId, ProcessedJob } from '@authenta/core';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 export interface AuthentaCaptureProps {
   /** Initialized AuthentaClient instance. */
   client: AuthentaClient;
-  /** Model type to run against. Defaults to 'FI-1'. */
-  modelType?: ModelType;
+  /** Task type ID to run against. Defaults to '8' (face-intelligence). */
+  taskTypeId?: TaskTypeId;
   /** Controls modal visibility. */
   visible: boolean;
   /** Called when the user dismisses the modal. */
   onClose: () => void;
   /** Called with the fully-processed result when detection completes. */
-  onResult: (result: ProcessedMedia) => void;
+  onResult: (result: ProcessedJob) => void;
   /** Called on API or capture errors. */
   onError?: (error: Error | AuthentaError) => void;
   /** Pre-enable the liveness check toggle. */
@@ -100,7 +100,7 @@ function asFileUri(path: string): string {
 
 export function AuthentaCapture({
   client,
-  modelType = 'FI-1',
+  taskTypeId = '8',
   visible,
   onClose,
   onResult,
@@ -121,7 +121,7 @@ export function AuthentaCapture({
   const [referenceUri, setReferenceUri]   = useState<string | undefined>();
   const [isRecording, setIsRecording]     = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
-  const [lastResult, setLastResult]       = useState<ProcessedMedia | undefined>();
+  const [lastResult, setLastResult]       = useState<ProcessedJob | undefined>();
   const [lastError, setLastError]         = useState<Error | AuthentaError | undefined>();
   const retryCount                        = useRef(0);
 
@@ -286,10 +286,10 @@ export function AuthentaCapture({
   const runProcessing = useCallback(async (uri: string) => {
     setStep('processing');
     try {
-      const result = await client.uploadAndPoll(uri, modelType, {
-        livenessCheck: liveness,
-        faceswapCheck: faceswap,
-        faceSimilarityCheck: similarity,
+      const result = await client.uploadAndPoll(uri, taskTypeId, {
+        isLivenessCheck: liveness,
+        isFaceswapCheck: faceswap,
+        isSimilarityCheck: similarity,
         referenceImage: similarity ? referenceUri : undefined,
       });
       setLastResult(result);
@@ -298,7 +298,7 @@ export function AuthentaCapture({
     } catch (err) {
       handleError(err instanceof Error ? err : new AuthentaError(String(err)));
     }
-  }, [client, modelType, liveness, faceswap, similarity, referenceUri, onResult, handleError]);
+  }, [client, taskTypeId, liveness, faceswap, similarity, referenceUri, onResult, handleError]);
 
   const handleTakePhoto = useCallback(async () => {
     if (!isCameraReady) {
@@ -413,7 +413,7 @@ export function AuthentaCapture({
   // Render helpers
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const isFI = modelType.toUpperCase() === 'FI-1';
+  const isFI = taskTypeId === '8';
 
   // ── Toggles screen ──────────────────────────────────────────────────────────
   function renderToggles() {
@@ -457,7 +457,7 @@ export function AuthentaCapture({
         ) : (
           <View style={s.infoCard}>
             <Text style={s.infoText}>
-              Model <Text style={s.bold}>{modelType}</Text> will be applied automatically.
+              Task type <Text style={s.bold}>{taskTypeId}</Text> will be applied automatically.
             </Text>
           </View>
         )}
@@ -672,9 +672,9 @@ export function AuthentaCapture({
         <Text style={s.title}>Detection Complete</Text>
 
         <View style={s.resultCard}>
-          <ResultRow label="mid"            value={lastResult.mid} />
+          <ResultRow label="id"             value={lastResult.id} />
           <ResultRow label="status"         value={lastResult.status} />
-          <ResultRow label="model"          value={lastResult.modelType} />
+          <ResultRow label="taskTypeId"     value={lastResult.taskTypeId} />
           {r && <>
             <ResultRow label="isLiveness"      value={r.isLiveness} />
             <ResultRow label="isDeepFake"      value={r.isDeepFake} />

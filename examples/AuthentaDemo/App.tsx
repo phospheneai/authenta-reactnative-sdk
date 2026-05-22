@@ -8,7 +8,7 @@
  *  2. Toggle which checks you want to run.
  *  3. Tap "Start Detection" — AuthentaCapture opens the camera,
  *     captures the image/video, uploads it, polls for the result,
- *     and returns the finished ProcessedMedia object.
+ *     and returns the finished ProcessedJob object.
  *  4. Display whatever you want from the result.
  *
  * The SDK handles: camera permission, VisionCamera, capture/record,
@@ -28,15 +28,14 @@ import {
 
 // ─── Import ONLY these two things from the SDK ──────────────────────────────
 import { AuthentaClient } from '@authenta/core';
-import type { ProcessedMedia } from '@authenta/core';
+import type { ProcessedJob } from '@authenta/core';
 import {AuthentaCapture} from "@authenta/react-native";
 
 // ─── 1. Create the client once (typically in a context or singleton) ─────────
 
 const client = new AuthentaClient({
   baseUrl: 'https://platform.authenta.ai',
-  clientId: '69b7cc2ba60ba049ffc1f8c6',
-  clientSecret: 'm89MUxVWqOTiVSlGQBNZpKQetCPolrqj',
+  apiKey: 'api_xxxxxxxx',
 });
 
 // ─── 2. Your screen ──────────────────────────────────────────────────────────
@@ -51,12 +50,12 @@ export default function App() {
   const [captureOpen, setCaptureOpen] = useState(false);
 
   // Result / error from AuthentaCapture
-  const [result, setResult] = useState<ProcessedMedia | null>(null);
+  const [result, setResult] = useState<ProcessedJob | null>(null);
   const [error, setError]   = useState<string | null>(null);
 
   const atLeastOneEnabled = livenessCheck || faceswapCheck || faceSimilarityCheck;
 
-  function handleResult(res: ProcessedMedia) {
+  function handleResult(res: ProcessedJob) {
     // The SDK finished everything — just display what you need
     setResult(res);
     setError(null);
@@ -148,9 +147,9 @@ export default function App() {
           <View style={s.resultCard}>
             <Text style={s.resultTitle}>Result</Text>
 
-            <ResultRow label="Status"  value={result.status} />
-            <ResultRow label="Model"   value={result.modelType} />
-            <ResultRow label="Media ID" value={result.mid} />
+            <ResultRow label="Status"     value={result.status} />
+            <ResultRow label="Task Type" value={result.taskTypeId} />
+            <ResultRow label="Job ID"    value={result.id} />
 
             {result.result && (
               <>
@@ -177,7 +176,7 @@ export default function App() {
       {/* ── 3. AuthentaCapture — client app passes checks, SDK does the rest ─ */}
       <AuthentaCapture
         client={client}
-        modelType="FI-1"
+        taskTypeId="8"
         visible={captureOpen}
         onClose={() => setCaptureOpen(false)}
         livenessCheck={livenessCheck}

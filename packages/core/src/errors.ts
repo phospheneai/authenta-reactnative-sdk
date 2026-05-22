@@ -12,29 +12,22 @@ export class AuthentaError extends Error {
 
 export class AuthenticationError extends AuthentaError {
   constructor(message: string, statusCode?: number, details?: Record<string, any>) {
-    super(message, 'IAM001', statusCode, details);
+    super(message, 'INVALID_API_KEY', statusCode, details);
     this.name = 'AuthenticationError';
   }
 }
 
 export class AuthorizationError extends AuthentaError {
   constructor(message: string, statusCode?: number, details?: Record<string, any>) {
-    super(message, 'IAM002', statusCode, details);
+    super(message, 'FORBIDDEN', statusCode, details);
     this.name = 'AuthorizationError';
   }
 }
 
-export class QuotaExceededError extends AuthentaError {
+export class InsufficientBalanceError extends AuthentaError {
   constructor(message: string, statusCode?: number, details?: Record<string, any>) {
-    super(message, 'AA001', statusCode, details);
-    this.name = 'QuotaExceededError';
-  }
-}
-
-export class InsufficientCreditsError extends AuthentaError {
-  constructor(message: string, statusCode?: number, details?: Record<string, any>) {
-    super(message, 'U007', statusCode, details);
-    this.name = 'InsufficientCreditsError';
+    super(message, 'INSUFFICIENT_BALANCE', statusCode, details);
+    this.name = 'InsufficientBalanceError';
   }
 }
 

@@ -3,7 +3,7 @@
  *
  * Two modes:
  *   1. Single function  — client.uploadAndPoll()  handles everything in one call
- *   2. Step by step     — createMedia → upload → pollResult → getResult manually
+ *   2. Step by step     — createJob → upload → pollResult → getResult manually
  *
  * Flip the TEST flags to choose what to run, then:
  *   npx ts-node __tests__/client.test.ts
@@ -15,8 +15,7 @@ import { AuthentaClient, AuthentaError } from '../src';
 
 const client = new AuthentaClient({
   baseUrl: 'https://platform.authenta.ai',
-  clientId: '<CLIENT_ID>',
-  clientSecret: '<CLIENT_SECRET>',
+  apiKey: '<API_KEY>',
 });
 
 // ─── File paths ───────────────────────────────────────────────────────────────
@@ -30,21 +29,22 @@ const REF_URI   = 'file:///Volumes/Software/authenta-reactnative-sdk/data_sample
 const TEST = {
   // ── Single function ──────────────────────────────────────────────────────
   single: {
-    fi1:            true,  // Face Intelligence — all checks in one go (liveness + faceswap + similarity)
-    df1:            false, // Deepfake — video
-    ac1:            false, // AI-generated image check
-    fi1_liveness:   true,  // Face liveness — image
-    fi1_faceswap:   false, // Face swap — video
-    fi1_similarity: false, // Face similarity — image + reference
+    fi:             true,  // Face Intelligence (taskTypeId 8) — liveness + faceswap + similarity
+    df:             false, // Faceswap detection (taskTypeId 4) — video
+    ac:             false, // AI image detection (taskTypeId 1) — image
+    fi_liveness:    true,  // Face intelligence — liveness check
+    fi_faceswap:    false, // Face intelligence — faceswap check (video)
+    fi_similarity:  false, // Face intelligence — similarity check (image + reference)
+    fe:             false, // Face embeddings (taskTypeId 9) — image
   },
 
   // ── Step by step ─────────────────────────────────────────────────────────
   steps: {
-    df1:            false,
-    ac1:            false,
-    fi1_liveness:   false,
-    fi1_faceswap:   false,
-    fi1_similarity: false,
+    df:             false,
+    ac:             false,
+    fi_liveness:    false,
+    fi_faceswap:    false,
+    fi_similarity:  false,
   },
 };
 
@@ -57,61 +57,69 @@ async function singleFunctionTests() {
   console.log('║  SINGLE FUNCTION: client.uploadAndPoll()  ║');
   console.log('╚══════════════════════════════════════╝');
 
-  if (TEST.single.df1) {
-    console.log('\n── DF-1: Deepfake detection ─────────────────────────────────');
-    const result = await client.uploadAndPoll(VIDEO_URI, 'DF-1');
-    console.log('mid    :', result.mid);
+  if (TEST.single.df) {
+    console.log('\n── taskTypeId 4: Faceswap detection ────────────────────────');
+    const result = await client.uploadAndPoll(VIDEO_URI, '4');
+    console.log('id     :', result.id);
     console.log('status :', result.status);
     console.log('result :', result.result);
   }
 
-  if (TEST.single.ac1) {
-    console.log('\n── AC-1: AI-generated image check ──────────────────────────');
-    const result = await client.uploadAndPoll(IMAGE_URI, 'AC-1');
-    console.log('mid    :', result.mid);
+  if (TEST.single.ac) {
+    console.log('\n── taskTypeId 1: AI image detection ────────────────────────');
+    const result = await client.uploadAndPoll(IMAGE_URI, '1');
+    console.log('id     :', result.id);
     console.log('status :', result.status);
     console.log('result :', result.result);
   }
 
-  if (TEST.single.fi1) {
-    console.log('\n── FI-1: Face Intelligence check ────────────────────────────');
-    const result = await client.uploadAndPoll(IMAGE_URI, 'FI-1', {
-      livenessCheck:      TEST.single.fi1_liveness,
-      faceswapCheck:      TEST.single.fi1_faceswap,
-      faceSimilarityCheck: TEST.single.fi1_similarity,
-      referenceImage:     TEST.single.fi1_similarity ? REF_URI : undefined,
+  if (TEST.single.fi) {
+    console.log('\n── taskTypeId 8: Face Intelligence ──────────────────────────');
+    const result = await client.uploadAndPoll(IMAGE_URI, '8', {
+      isLivenessCheck:   TEST.single.fi_liveness,
+      isFaceswapCheck:   TEST.single.fi_faceswap,
+      isSimilarityCheck: TEST.single.fi_similarity,
+      referenceImage:    TEST.single.fi_similarity ? REF_URI : undefined,
     });
-    console.log('mid    :', result.mid);
+    console.log('id     :', result.id);
     console.log('status :', result.status);
     console.log('result :', result.result);
   }
 
-  if (TEST.single.fi1_liveness) {
-    console.log('\n── FI-1: Liveness check ─────────────────────────────────────');
-    const result = await client.uploadAndPoll(IMAGE_URI, 'FI-1', { livenessCheck: true });
-    console.log('mid        :', result.mid);
+  if (TEST.single.fi_liveness) {
+    console.log('\n── taskTypeId 8: Liveness check ─────────────────────────────');
+    const result = await client.uploadAndPoll(IMAGE_URI, '8', { isLivenessCheck: true });
+    console.log('id         :', result.id);
     console.log('status     :', result.status);
     console.log('isLiveness :', result.result?.isLiveness);
   }
 
-  if (TEST.single.fi1_faceswap) {
-    console.log('\n── FI-1: Faceswap check ─────────────────────────────────────');
-    const result = await client.uploadAndPoll(VIDEO_URI, 'FI-1', { faceswapCheck: true });
-    console.log('mid        :', result.mid);
+  if (TEST.single.fi_faceswap) {
+    console.log('\n── taskTypeId 8: Faceswap check ─────────────────────────────');
+    const result = await client.uploadAndPoll(VIDEO_URI, '8', { isFaceswapCheck: true });
+    console.log('id         :', result.id);
     console.log('status     :', result.status);
     console.log('isDeepFake :', result.result?.isDeepFake);
   }
 
-  if (TEST.single.fi1_similarity) {
-    console.log('\n── FI-1: Face similarity ────────────────────────────────────');
-    const result = await client.uploadAndPoll(IMAGE_URI, 'FI-1', {
-      faceSimilarityCheck: true,
+  if (TEST.single.fi_similarity) {
+    console.log('\n── taskTypeId 8: Face similarity ────────────────────────────');
+    const result = await client.uploadAndPoll(IMAGE_URI, '8', {
+      isSimilarityCheck: true,
       referenceImage: REF_URI,
     });
-    console.log('mid             :', result.mid);
+    console.log('id              :', result.id);
     console.log('status          :', result.status);
     console.log('isSimilar       :', result.result?.isSimilar);
     console.log('similarityScore :', result.result?.similarityScore);
+  }
+
+  if (TEST.single.fe) {
+    console.log('\n── taskTypeId 9: Face embeddings ────────────────────────────');
+    const result = await client.uploadAndPoll(IMAGE_URI, '9');
+    console.log('id         :', result.id);
+    console.log('status     :', result.status);
+    console.log('faceVector :', result.result?.faceVector);
   }
 }
 
@@ -124,63 +132,63 @@ async function stepByStepTests() {
   console.log('║  STEP BY STEP: upload → pollResult → getResult            ║');
   console.log('╚══════════════════════════════════════════════════════════════╝');
 
-  if (TEST.steps.df1) {
-    console.log('\n── DF-1: step by step ───────────────────────────────────────');
-    const uploaded = await client.uploadAndPoll(VIDEO_URI, 'DF-1', { autoPolling: false });
-    console.log('uploaded — mid    :', uploaded.mid);
-    const media = await client.pollResult(uploaded.mid);
-    if (media.resultURL) {
-      const result = await client.getResult(media);
+  if (TEST.steps.df) {
+    console.log('\n── taskTypeId 4: step by step ───────────────────────────────');
+    const uploaded = await client.uploadAndPoll(VIDEO_URI, '4', { autoPolling: false });
+    console.log('uploaded — id :', uploaded.id);
+    const job = await client.pollResult(uploaded.id);
+    if (job.resultURL) {
+      const result = await client.getResult(job);
       console.log('result :', result);
     }
   }
 
-  if (TEST.steps.ac1) {
-    console.log('\n── AC-1: step by step ───────────────────────────────────────');
-    const uploaded = await client.uploadAndPoll(IMAGE_URI, 'AC-1', { autoPolling: false });
-    const media = await client.pollResult(uploaded.mid);
-    if (media.resultURL) {
-      const result = await client.getResult(media);
+  if (TEST.steps.ac) {
+    console.log('\n── taskTypeId 1: step by step ───────────────────────────────');
+    const uploaded = await client.uploadAndPoll(IMAGE_URI, '1', { autoPolling: false });
+    const job = await client.pollResult(uploaded.id);
+    if (job.resultURL) {
+      const result = await client.getResult(job);
       console.log('result :', result);
     }
   }
 
-  if (TEST.steps.fi1_liveness) {
-    console.log('\n── FI-1 liveness: step by step ──────────────────────────────');
-    const uploaded = await client.uploadAndPoll(IMAGE_URI, 'FI-1', {
-      livenessCheck: true,
+  if (TEST.steps.fi_liveness) {
+    console.log('\n── taskTypeId 8 liveness: step by step ──────────────────────');
+    const uploaded = await client.uploadAndPoll(IMAGE_URI, '8', {
+      isLivenessCheck: true,
       autoPolling: false,
     });
-    const media = await client.pollResult(uploaded.mid);
-    if (media.resultURL) {
-      const result = await client.getResult(media);
+    const job = await client.pollResult(uploaded.id);
+    if (job.resultURL) {
+      const result = await client.getResult(job);
       console.log('isLiveness :', result.isLiveness);
     }
   }
 
-  if (TEST.steps.fi1_faceswap) {
-    console.log('\n── FI-1 faceswap: step by step ──────────────────────────────');
-    const uploaded = await client.uploadAndPoll(VIDEO_URI, 'FI-1', {
-      faceswapCheck: true,
+  if (TEST.steps.fi_faceswap) {
+    console.log('\n── taskTypeId 8 faceswap: step by step ──────────────────────');
+    const uploaded = await client.uploadAndPoll(VIDEO_URI, '8', {
+      isFaceswapCheck: true,
       autoPolling: false,
     });
-    const media = await client.pollResult(uploaded.mid);
-    if (media.resultURL) {
-      const result = await client.getResult(media);
+    const job = await client.pollResult(uploaded.id);
+    if (job.resultURL) {
+      const result = await client.getResult(job);
       console.log('isDeepFake :', result.isDeepFake);
     }
   }
 
-  if (TEST.steps.fi1_similarity) {
-    console.log('\n── FI-1 similarity: step by step ────────────────────────────');
-    const uploaded = await client.uploadAndPoll(IMAGE_URI, 'FI-1', {
-      faceSimilarityCheck: true,
+  if (TEST.steps.fi_similarity) {
+    console.log('\n── taskTypeId 8 similarity: step by step ────────────────────');
+    const uploaded = await client.uploadAndPoll(IMAGE_URI, '8', {
+      isSimilarityCheck: true,
       referenceImage: REF_URI,
       autoPolling: false,
     });
-    const media = await client.pollResult(uploaded.mid);
-    if (media.resultURL) {
-      const result = await client.getResult(media);
+    const job = await client.pollResult(uploaded.id);
+    if (job.resultURL) {
+      const result = await client.getResult(job);
       console.log('isSimilar       :', result.isSimilar);
       console.log('similarityScore :', result.similarityScore);
     }
