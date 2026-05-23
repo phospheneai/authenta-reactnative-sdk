@@ -14,15 +14,15 @@ import { AuthentaClient, AuthentaError } from '../src';
 // ─── SDK setup ───────────────────────────────────────────────────────────────
 
 const client = new AuthentaClient({
-  baseUrl: 'https://platform.authenta.ai',
-  apiKey: '<API_KEY>',
+  baseUrl: 'http://localhost:8080',
+  apiKey: 'api_bbb3cb97955941671a5074f520ac791e14326e55721b5e61bfe692136563278a',
 });
 
 // ─── File paths ───────────────────────────────────────────────────────────────
 
-const VIDEO_URI = 'file:///Volumes/Software/authenta-reactnative-sdk/data_samples/faceswap/real/1.mp4';
-const IMAGE_URI = 'file:///Volumes/Software/authenta-reactnative-sdk/data_samples/face_live_images/real/1.jpg';
-const REF_URI   = 'file:///Volumes/Software/authenta-reactnative-sdk/data_samples/face_similiar/person_1/B.jpeg';
+const IMAGE_URI = 'file:///d:/SDK/authenta-reactnative-sdk/data_samples/face_live_images/real/1.jpg';
+const VIDEO_URI = 'file:///d:/SDK/authenta-reactnative-sdk/data_samples/faceswap/real/1.mp4';
+const REF_URI   = 'file:///d:/SDK/authenta-reactnative-sdk/data_samples/face_similiar/person_1/B.jpeg';
 
 // ─── Toggle which tests to run ────────────────────────────────────────────────
 

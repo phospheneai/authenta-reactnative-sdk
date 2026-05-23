@@ -50,19 +50,24 @@ export interface RunOptions extends FIOptions, PollingOptions {
   autoPolling?: boolean; // default true — wait for result before returning
 }
 
-// POST /api/v1/jobs response — contains per-slot upload URLs
+// POST /api/v1/jobs response — job metadata is nested under "job", upload URLs under "inputs"
 export interface JobSlotUpload {
   slotName: string;
   uploadUrl: string;
+  uploadUrlExpiresAt?: string;
 }
 
 export interface CreateJobResponse {
-  id: string;
-  status: JobStatus;
-  taskTypeId: string;
-  contentType: string;
-  sizeBytes: number;
-  createdAt: string;
+  job: {
+    id: string;
+    tenantId?: string;
+    taskTypeId: string;
+    status: JobStatus;
+    cost?: number;
+    createdAt: string;
+    updatedAt?: string;
+    result?: any;
+  };
   inputs: JobSlotUpload[];
 }
 

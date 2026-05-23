@@ -204,7 +204,9 @@ export class AuthentaClient {
     if (typeof XMLHttpRequest === 'undefined') {
       const _require = require;
       const fs = _require('fs') as typeof import('fs');
-      const filePath = normalizedUri.replace(/^file:\/\//, '');
+      let filePath = normalizedUri.replace(/^file:\/\//, '');
+      // On Windows, file:///d:/path → /d:/path — strip the leading slash before the drive letter
+      if (/^\/[a-zA-Z]:[\\/]/.test(filePath)) filePath = filePath.slice(1);
       const buffer = fs.readFileSync(filePath);
       const blob = new Blob([buffer], { type });
       return Promise.resolve({ name, type, size: buffer.byteLength, blob });
@@ -331,10 +333,10 @@ export class AuthentaClient {
       }
     }
 
-    const job = await this.createJob({ inputs, taskTypeId, parameters });
+    const response = await this.createJob({ inputs, taskTypeId, parameters });
 
     // Upload each slot to its respective S3 URL
-    for (const slot of job.inputs) {
+    for (const slot of response.inputs) {
       if (slot.slotName === 'original') {
         await this.uploadToS3(slot.uploadUrl, mediaSource);
       } else if (slot.slotName === 'reference' && fiOptions?.referenceImage) {
@@ -344,9 +346,9 @@ export class AuthentaClient {
     }
 
     // Send job to processing queue
-    await this.finalizeJob(job.id);
+    await this.finalizeJob(response.job.id);
 
-    return job;
+    return response;
   }
 
   // ─── Polling ───────────────────────────────────────────────────────────────
@@ -445,10 +447,10 @@ export class AuthentaClient {
       ? { isFaceswapCheck, isLivenessCheck, isSimilarityCheck, referenceImage }
       : undefined;
 
-    const job = await this.upload(uri, taskTypeId, fiOptions);
-    if (!autoPolling) return job as ProcessedJob;
+    const response = await this.upload(uri, taskTypeId, fiOptions);
+    if (!autoPolling) return { ...response.job } as ProcessedJob;
 
-    const polled = await this.pollResult(job.id, { interval, timeout });
+    const polled = await this.pollResult(response.job.id, { interval, timeout });
     const result = polled.resultURL ? await this.getResult(polled) : undefined;
     return { ...polled, result };
   }
