@@ -34,6 +34,8 @@ import {
 import type { CameraOutput, CameraRef, Recorder } from 'react-native-vision-camera';
 import { launchImageLibrary } from 'react-native-image-picker';
 
+import { Video } from 'react-native-compressor';
+
 import { AuthentaClient, AuthentaError, ValidationError } from '@authenta/core';
 import type { ModelType, ProcessedMedia } from '@authenta/core';
 
@@ -67,6 +69,25 @@ type CaptureMode = 'photo' | 'video' | 'both';
 
 const MAX_RETRIES = 3;
 const VIDEO_MAX_DURATION_MS = 10_000;
+const VIDEO_SIZE_LIMIT_BYTES = 6 * 1024 * 1024; // 6 MB
+
+/** Compress the video only if it exceeds 6 MB. Uses react-native-blob-util for
+ *  the size check (peer dep) and react-native-compressor for the encode step. */
+async function compressVideoIfNeeded(fileUri: string): Promise<string> {
+  try {
+    const rawPath = fileUri.replace(/^file:\/\//, '');
+    // Size check via react-native-blob-util (already required by the host app)
+    const blobUtil: any = (() => { try { const m = require('react-native-blob-util'); return m?.default ?? m; } catch { return null; } })();
+    if (blobUtil) {
+      const stat = await blobUtil.fs.stat(rawPath);
+      if (Number(stat.size) <= VIDEO_SIZE_LIMIT_BYTES) return fileUri;
+    }
+    // File is over 6 MB — compress it
+    return await Video.compress(fileUri, { compressionMethod: 'auto', minimumFileSizeForCompress: 0 });
+  } catch {
+    return fileUri; // on any failure, upload the original
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -132,7 +153,8 @@ export function AuthentaCapture({
   const { hasPermission: hasMicPermission, requestPermission: requestMicPermission } = useMicrophonePermission();
   const cameraRef     = useRef<CameraRef>(null);
   const photoOutput   = usePhotoOutput();
-  const videoOutput   = useVideoOutput({ enableAudio: true, fileType: 'mp4' });
+  // targetBitRate is a hint to the encoder; maxFileSize in createRecorder is the real hard cap.
+  const videoOutput   = useVideoOutput({ enableAudio: true, fileType: 'mp4', targetBitRate: 1_500_000 });
   const recorderRef   = useRef<Recorder | undefined>(undefined);
   const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isRecordingRef = useRef(false); // mirror of isRecording for async callbacks
@@ -286,12 +308,16 @@ export function AuthentaCapture({
   const runProcessing = useCallback(async (uri: string) => {
     setStep('processing');
     try {
+      // VisionCamera may return paths without file extensions; pass the MIME
+      // type explicitly so the API payload always has the correct contentType.
+      const contentTypeHint = captureMode === 'video' ? 'video/mp4' : 'image/jpeg';
       const result = await client.uploadAndPoll(uri, modelType, {
         livenessCheck: liveness,
         faceswapCheck: faceswap,
         faceSimilarityCheck: similarity,
         referenceImage: similarity ? referenceUri : undefined,
-      });
+        contentType: contentTypeHint,
+      }) as ProcessedMedia;
       setLastResult(result);
       setStep('result');
       onResult(result);
@@ -358,13 +384,15 @@ export function AuthentaCapture({
     try {
       const recorder = await videoOutput.createRecorder({
         maxDuration: VIDEO_MAX_DURATION_MS / 1000,
+        maxFileSize: 7 * 1024 * 1024, // 7 MB hard cap — recording stops before the API rejects it
       });
       recorderRef.current = recorder;
 
       await recorder.startRecording(
         async (filePath) => {
           clearRecordingState();
-          await runProcessing(asFileUri(filePath));
+          const videoUri = await compressVideoIfNeeded(asFileUri(filePath));
+          await runProcessing(videoUri);
         },
         (err) => {
           clearRecordingState();
@@ -672,11 +700,11 @@ export function AuthentaCapture({
         <Text style={s.title}>Detection Complete</Text>
 
         <View style={s.resultCard}>
-          <ResultRow label="mid"            value={lastResult.mid} />
+          <ResultRow label="id"             value={lastResult.id} />
           <ResultRow label="status"         value={lastResult.status} />
-          <ResultRow label="model"          value={lastResult.modelType} />
+          <ResultRow label="taskTypeId"     value={lastResult.taskTypeId} />
           {r && <>
-            <ResultRow label="isLiveness"      value={r.isLiveness} />
+            <ResultRow label="isSpoof"         value={r.isSpoof} />
             <ResultRow label="isDeepFake"      value={r.isDeepFake} />
             <ResultRow label="isSimilar"       value={r.isSimilar} />
             <ResultRow label="similarityScore" value={r.similarityScore} />

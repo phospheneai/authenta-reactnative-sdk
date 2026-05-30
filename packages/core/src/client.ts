@@ -4,7 +4,6 @@ import {
   PollingOptions,
   RunOptions,
   CreateMediaResponse,
-  MediaRecord,
   ListMediaParams,
   ListMediaResponse,
   DetectionResult,
@@ -21,9 +20,12 @@ import {
 } from './errors';
 import { getMimeType, isImage, isVideo } from './utils/helpers';
 
-declare const __non_webpack_require__: typeof require | undefined;
+// Webpack/esbuild runtime require — declared without pulling in all @types/node.
+declare const __non_webpack_require__: ((id: string) => any) | undefined;
+// Node.js global require — declared minimally so Metro can still follow static analysis.
+declare function require(id: string): any;
 
-const TERMINAL_STATUSES = new Set(['PROCESSED', 'FAILED', 'ERROR']);
+const TERMINAL_STATUSES = new Set(['COMPLETED', 'PROCESSED', 'FAILED', 'ERROR']);
 
 type ResolvedUploadSource = {
   name: string;
@@ -80,7 +82,7 @@ function getReactNativeBlobUtil(): any | undefined {
       // Webpack / esbuild — runtime require so the bundler doesn't follow this.
       mod = __non_webpack_require__('react-native-blob-util');
     } else {
-      // Metro or Node.js — direct require so Metro registers the dependency.
+      // Metro — direct require so Metro registers the native dependency.
       mod = require('react-native-blob-util');
     }
     return mod?.default ?? mod;
@@ -91,34 +93,34 @@ function getReactNativeBlobUtil(): any | undefined {
 }
 
 export interface AuthentaClientConfig {
-  baseUrl?: string;
-  clientId: string;
-  clientSecret: string;
+  baseUrl: string;
+  api_key: string;
+  auth_enabled: boolean;
 }
 
 export class AuthentaClient {
   private readonly baseUrl: string;
-  private readonly clientId: string;
-  private readonly clientSecret: string;
+  private readonly api_key: string;
+  private readonly auth_enabled: boolean;
 
   constructor({
-    baseUrl = 'https://platform.authenta.ai',
-    clientId,
-    clientSecret,
+    baseUrl,
+    api_key,
+    auth_enabled,
   }: AuthentaClientConfig) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
-    this.clientId = clientId;
-    this.clientSecret = clientSecret;
+    this.api_key = api_key;
+    this.auth_enabled = auth_enabled;
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   private get authHeaders(): Record<string, string> {
-    return {
-      'x-client-id': this.clientId,
-      'x-client-secret': this.clientSecret,
-      'Content-Type': 'application/json',
-    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.auth_enabled) {
+      headers['Authorization'] = `Bearer ${this.api_key}`;
+    }
+    return headers;
   }
 
   private async request<T>(
@@ -211,7 +213,7 @@ export class AuthentaClient {
 
     // Node.js environment — XMLHttpRequest does not exist
     if (typeof XMLHttpRequest === 'undefined') {
-      // Use aliased require so Metro's static analyser does not try to bundle 'fs'
+      // Aliased so Metro's static analyser does not try to bundle 'fs'.
       const _require = require;
       const fs = _require('fs') as typeof import('fs');
       const filePath = normalizedUri.replace(/^file:\/\//, '');
@@ -239,9 +241,7 @@ export class AuthentaClient {
     if (source.filePath) {
       const blobUtil = getReactNativeBlobUtil();
       if (!blobUtil?.fetch || !blobUtil?.wrap) {
-        throw new AuthentaError(
-          'react-native-blob-util is required for React Native file uploads.',
-        );
+        throw new AuthentaError('react-native-blob-util is required for React Native file uploads.');
       }
 
       const response = await blobUtil.fetch(
@@ -278,25 +278,47 @@ export class AuthentaClient {
   // ─── Core media CRUD ───────────────────────────────────────────────────────
 
   async createMedia(params: {
-    name: string;
-    contentType: string;
-    size: number;
-    modelType: ModelType;
-    metadata?: Record<string, any>;
+    taskTypeId: string;
+    inputs: {
+      slotName: string;
+      contentType: string;
+      fileName: string;
+      sizeBytes: number;
+    }[];
+    parameters?: Record<string, boolean | string>;
   }): Promise<CreateMediaResponse> {
-    return this.request<CreateMediaResponse>('POST', '/api/media', params);
+    return this.request<CreateMediaResponse>('POST', '/api/v1/jobs', params);
   }
 
-  async getMedia(mid: string): Promise<MediaRecord> {
-    return this.request<MediaRecord>('GET', `/api/media/${mid}`);
+  async getMedia(jobId: string): Promise<ProcessedMedia> {
+    return this.request<ProcessedMedia>('GET', `/api/v1/jobs/${jobId}`);
   }
 
   async listMedia(params?: ListMediaParams): Promise<ListMediaResponse> {
-    return this.request<ListMediaResponse>('GET', '/api/media', undefined, params);
+    return this.request<ListMediaResponse>('GET', '/api/v1/jobs', undefined, params);
   }
 
   async deleteMedia(mid: string): Promise<void> {
-    await this.request<void>('DELETE', `/api/media/${mid}`);
+    await this.request<void>('DELETE', `/api/v1/jobs/${mid}`);
+  }
+
+  async get_task_id(modelType: ModelType): Promise<string> {
+    const mapping: Record<string, string> = {
+      'AC-1': '1',
+      'AF-1': '2',
+      'VF-1': '3',
+      'DF-1': '4',
+      'FD-1': '5',
+      'DI-1': '6',
+      'FL-1': '7',
+      'FI-1': '8',
+      'FE-1': '9',
+    };
+    const task_id = mapping[modelType.toUpperCase()];
+    if (!task_id) {
+      throw new ValidationError(`Unsupported modelType: ${modelType}`);
+    }
+    return task_id;
   }
 
   // ─── Upload (common for all models) ───────────────────────────────────────
@@ -306,38 +328,57 @@ export class AuthentaClient {
    * then PUTs the file blob to S3. Works for all model types.
    * Pass `fiOptions` only when modelType is "FI-1".
    */
-  async upload(uri: string, modelType: ModelType, fiOptions?: FIOptions): Promise<CreateMediaResponse> {
+  async upload(uri: string, modelType: ModelType, fiOptions?: FIOptions, contentTypeOverride?: string): Promise<CreateMediaResponse> {
     const mediaSource = await this.resolveUri(uri);
+    if (contentTypeOverride) mediaSource.type = contentTypeOverride;
 
     const payload: Parameters<typeof this.createMedia>[0] = {
-      name: mediaSource.name,
-      contentType: mediaSource.type,
-      size: mediaSource.size,
-      modelType,
+      taskTypeId: await this.get_task_id(modelType),
+      inputs: [{
+        slotName: 'original',
+        contentType: mediaSource.type,
+        fileName: mediaSource.name,
+        sizeBytes: mediaSource.size,
+      }],
     };
+
+    let referenceSource: ResolvedUploadSource | undefined;
 
     if (modelType.toUpperCase() === 'FI-1' && fiOptions) {
       const {
-        isSingleFace = true,
         faceswapCheck = false,
         livenessCheck = false,
         faceSimilarityCheck = false,
       } = fiOptions;
-      payload.metadata = { isSingleFace, faceswapCheck, livenessCheck, faceSimilarityCheck };
+      // Only send truthy flags — the API treats absent fields as false.
+      const params: Record<string, boolean> = {};
+      if (faceswapCheck) params.isFaceswapCheck = true;
+      if (livenessCheck) params.isLivenessCheck = true;
+      if (faceSimilarityCheck) params.isSimilarityCheck = true;
+      if (fiOptions.isSingleFace !== undefined) params.isSingleFace = fiOptions.isSingleFace;
+      payload.parameters = params;
+
+      // Reference slot is only needed when similarity check is requested.
+      if (faceSimilarityCheck && fiOptions.referenceImage) {
+        referenceSource = await this.resolveUri(fiOptions.referenceImage);
+        payload.inputs.push({
+          slotName: 'reference',
+          contentType: referenceSource.type,
+          fileName: referenceSource.name,
+          sizeBytes: referenceSource.size,
+        });
+      }
     }
 
     const media = await this.createMedia(payload);
-    await this.uploadToS3(media.uploadUrl, mediaSource);
 
-    if (modelType.toUpperCase() === 'FI-1' && fiOptions?.faceSimilarityCheck) {
-      if (!fiOptions.referenceImage) {
-        throw new ValidationError('referenceImage is required when faceSimilarityCheck is true');
+    await this.uploadToS3(media.inputs[0].uploadUrl, mediaSource);
+
+    if (referenceSource) {
+      if (!media.inputs[1]?.uploadUrl) {
+        throw new AuthentaError('No reference uploadUrl returned from server');
       }
-      if (!media.referenceUploadUrl) {
-        throw new AuthentaError('No referenceUploadUrl returned from server');
-      }
-      const referenceSource = await this.resolveUri(fiOptions.referenceImage);
-      await this.uploadToS3(media.referenceUploadUrl, referenceSource);
+      await this.uploadToS3(media.inputs[1].uploadUrl, referenceSource);
     }
 
     return media;
@@ -346,18 +387,19 @@ export class AuthentaClient {
   // ─── Polling ───────────────────────────────────────────────────────────────
 
   async pollResult(
-    mid: string,
+    jobid: string,
     { interval = 5000, timeout = 600_000 }: PollingOptions = {},
-  ): Promise<MediaRecord> {
+  ): Promise<ProcessedMedia> {
     const deadline = Date.now() + timeout;
 
     while (true) {
-      const media = await this.getMedia(mid);
+      const media = await this.getMedia(jobid);
+
       if (TERMINAL_STATUSES.has(media.status.toUpperCase())) return media;
 
       if (Date.now() >= deadline) {
         throw new AuthentaError(
-          `Timed out waiting for media ${mid} — last status: ${media.status}`,
+          `Timed out waiting for media ${jobid} — last status: ${media.status}`,
         );
       }
 
@@ -367,21 +409,41 @@ export class AuthentaClient {
 
   // ─── Result ────────────────────────────────────────────────────────────────
 
-  async getResult(media: MediaRecord): Promise<DetectionResult> {
-    if (!media.resultURL) {
-      throw new ValidationError(
-        'media has no resultURL — ensure processing is complete (status=PROCESSED)',
-      );
+  async getResult(media: ProcessedMedia): Promise<DetectionResult> {
+    for (const artifact of media.artifacts ?? []) {
+      if (artifact.kind === 'result') {
+        if (!artifact.downloadUrl) {
+          throw new AuthentaError('Result artifact has no downloadUrl — ensure processing is complete');
+        }
+        const response = await fetch(artifact.downloadUrl);
+        if (!response.ok) {
+          throw new AuthentaError(
+            `Failed to fetch result artifact: HTTP ${response.status}`,
+            undefined,
+            response.status,
+          );
+        }
+        return response.json() as Promise<DetectionResult>;
+      }
     }
-    const response = await fetch(media.resultURL);
+    // Fall back to result already embedded in the job response.
+    if (media.result) return media.result;
+    throw new AuthentaError('No result available — ensure processing is complete');
+  }
+
+  async finalizeMedia(jobId: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/api/v1/jobs/${jobId}/finalize`, {
+      method: 'POST',
+      headers: this.authHeaders,
+    });
+
     if (!response.ok) {
       throw new AuthentaError(
-        `Failed to fetch resultURL: HTTP ${response.status}`,
+        `Failed to finalize media: HTTP ${response.status}`,
         undefined,
         response.status,
       );
     }
-    return response.json() as Promise<DetectionResult>;
   }
 
   // ─── High-level: one function for all models ──────────────────────────────
@@ -392,7 +454,7 @@ export class AuthentaClient {
    *
    * - For all models: uploads, polls until complete, and fetches the result.
    * - For FI-1: pass any face-check flags; unset flags default to false.
-   * - Set `autoPolling: false` to return immediately after upload.
+   * - Set `autoPolling: false` to return immediately after upload (returns CreateMediaResponse).
    *
    * @example DF-1 / AC-1
    *   const result = await client.uploadAndPoll('file:///path/to/video.mp4', 'DF-1');
@@ -421,8 +483,9 @@ export class AuthentaClient {
       livenessCheck = false,
       faceSimilarityCheck = false,
       referenceImage,
+      contentType,
     }: RunOptions = {},
-  ): Promise<ProcessedMedia> {
+  ): Promise<ProcessedMedia | CreateMediaResponse> {
     const isFI = modelType.toUpperCase() === 'FI-1';
 
     if (isFI) {
@@ -442,62 +505,50 @@ export class AuthentaClient {
       ? { isSingleFace, faceswapCheck, livenessCheck, faceSimilarityCheck, referenceImage }
       : undefined;
 
-    const meta = await this.upload(uri, modelType, fiOptions);
-    if (!autoPolling) return meta as ProcessedMedia;
+    const meta = await this.upload(uri, modelType, fiOptions, contentType);
+    await this.finalizeMedia(meta.job.id);
+    if (!autoPolling) return meta;
 
-    const media = await this.pollResult(meta.mid, { interval, timeout });
-    const result = media.resultURL ? await this.getResult(media) : undefined;
+    const media = await this.pollResult(meta.job.id, { interval, timeout });
+    const result = await this.getResult(media);
     return { ...media, result };
   }
 
-  async verify_deepfake(uri: string): Promise<ProcessedMedia> {
-    const type = getMimeType(uri.split('/').pop() ?? '');
+  // ─── Convenience wrappers ─────────────────────────────────────────────────
 
+  async verify_deepfake(uri: string): Promise<DetectionResult> {
+    const type = getMimeType(uri.split('/').pop() ?? '');
     if (!isVideo(type)) {
       throw new ValidationError('verify_deepfake only accepts video files');
     }
-
-    const fiOptions: FIOptions ={
-      faceswapCheck: true,
-    }
-    return this.uploadAndPoll(uri, 'FI-1', fiOptions);
+    const res = await this.uploadAndPoll(uri, 'FI-1', { faceswapCheck: true }) as ProcessedMedia;
+    return res.result!;
   }
 
   async verify_liveness(uri: string): Promise<DetectionResult> {
     const type = getMimeType(uri.split('/').pop() ?? '');
-
-    if (!isImage(type) || !isVideo(type)) {
+    if (!isImage(type) && !isVideo(type)) {
       throw new ValidationError('verify_liveness only accepts image or video files');
     }
-    const fiOptions: FIOptions ={
-      livenessCheck: true,
-    }
-    const media = await this.uploadAndPoll(uri, 'FI-1', fiOptions);
-    return {"mid": media.mid, "status": media.status, "isLiveness": media.result?.isLiveness};
+    const res = await this.uploadAndPoll(uri, 'FI-1', { livenessCheck: true }) as ProcessedMedia;
+    return res.result!;
   }
 
-  async verify_similarity(uri: string, referenceImage: string): Promise<ProcessedMedia> {
+  async verify_similarity(uri: string, referenceImage: string): Promise<DetectionResult> {
     const type = getMimeType(uri.split('/').pop() ?? '');
-
     if (!isImage(type)) {
       throw new ValidationError('verify_similarity only accepts image files');
     }
-
-    const fiOptions: FIOptions ={
-      faceSimilarityCheck: true,
-      referenceImage,
-    }
-    return this.uploadAndPoll(uri, 'FI-1', fiOptions);
+    const res = await this.uploadAndPoll(uri, 'FI-1', { faceSimilarityCheck: true, referenceImage }) as ProcessedMedia;
+    return res.result!;
   }
 
-  async verify_face_embeddings(uri: string): Promise<ProcessedMedia> {
+  async verify_face_embeddings(uri: string): Promise<DetectionResult> {
     const type = getMimeType(uri.split('/').pop() ?? '');
-
     if (!isImage(type)) {
       throw new ValidationError('verify_face_embeddings only accepts image files');
     }
-
-    return this.uploadAndPoll(uri, 'FE-1');
+    const res = await this.uploadAndPoll(uri, 'FE-1') as ProcessedMedia;
+    return res.result!;
   }
-
 }

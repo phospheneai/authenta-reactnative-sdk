@@ -35,8 +35,8 @@ import {AuthentaCapture} from "@authenta/react-native";
 
 const client = new AuthentaClient({
   baseUrl: 'https://platform.authenta.ai',
-  clientId: '69b7cc2ba60ba049ffc1f8c6',
-  clientSecret: 'm89MUxVWqOTiVSlGQBNZpKQetCPolrqj',
+  api_key: 'API_KEY_HERE', // Get this from your Authenta dashboard
+  auth_enabled: true,
 });
 
 // ─── 2. Your screen ──────────────────────────────────────────────────────────
@@ -149,13 +149,13 @@ export default function App() {
             <Text style={s.resultTitle}>Result</Text>
 
             <ResultRow label="Status"  value={result.status} />
-            <ResultRow label="Model"   value={result.modelType} />
-            <ResultRow label="Media ID" value={result.mid} />
+            <ResultRow label="Task"    value={result.taskTypeId} />
+            <ResultRow label="Job ID"  value={result.id} />
 
             {result.result && (
               <>
                 <View style={s.divider} />
-                <ResultRow label="Is Liveness"      value={result.result.isLiveness} />
+                <ResultRow label="Is Spoof"         value={result.result.isSpoof} />
                 <ResultRow label="Is Deepfake"      value={result.result.isDeepFake} />
                 <ResultRow label="Is Similar"       value={result.result.isSimilar} />
                 <ResultRow label="Similarity Score" value={result.result.similarityScore} />

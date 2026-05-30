@@ -3,6 +3,7 @@
   "compilerOptions": {
     "jsx": "react-native",
     "types": ["jest"],
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@authenta/core":         ["node_modules/@authenta/core"],

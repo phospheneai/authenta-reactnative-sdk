@@ -1,98 +1,80 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  AUTHENTA CORE SDK  ·  FI-1 Model  ·  FACESWAP CHECK
-//  Every function in the SDK demonstrated one by one.
+//  AUTHENTA CORE SDK  ·  FI-1  ·  FACESWAP / DEEPFAKE CHECK  (video only)
 //
-//  HOW TO RUN THIS FILE
+//  HOW TO RUN
 //    npx ts-node examples/core/02-faceswap-check.ts
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━══
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { AuthentaClient } from '@authenta/core';
-import type { CreateMediaResponse, MediaRecord, DetectionResult } from '@authenta/core';
-
-
-// ┌─────────────────────────────────────────────────────────────────────────┐
-// │  CELL 1 — Create the client                                             │
-// └─────────────────────────────────────────────────────────────────────────┘
-//
-//  Before calling any function you need ONE client object.
-//  Think of it like a logged-in session — it holds your credentials
-//  so every call is automatically authenticated.
-//
-//  baseUrl      → the server address  (can leave it out, default is correct)
-//  clientId     → your organisation's unique ID  (from the Authenta dashboard)
-//  clientSecret → your private key   (never share this, never put it in git)
+import type { ProcessedMedia, DetectionResult } from '@authenta/core';
 
 const client = new AuthentaClient({
   baseUrl:      'https://platform.authenta.ai',
-  clientId:     '',
-  clientSecret: '',
+  api_key:      'YOUR_API_KEY',
+  auth_enabled: true,
 });
+
+// faceswap check requires a video — passing an image throws ValidationError
+const VIDEO_URI = 'file:///path/to/clip.mp4';
 
 
 // ┌─────────────────────────────────────────────────────────────────────────┐
-// │  CELL 6 — uploadAndPoll()   ← the one function most apps use           │
+// │  OPTION A — uploadAndPoll()                                             │
 // └─────────────────────────────────────────────────────────────────────────┘
-//
-//  WHAT IT DOES
-//    Combines upload() + pollResult() + getResult() into a single call.
-//    You give it a file path and your options. It returns the final answer.
-//
-//    Internally it runs:
-//      Step 1 → upload()      (send file to cloud)
-//      Step 2 → pollResult()  (wait for AI to finish)
-//      Step 3 → getResult()   (download the answer)
-//
-//  WHEN TO USE THIS vs THE STEP-BY-STEP APPROACH
-//    Use uploadAndPoll() for 99% of cases — it is simpler.
-//    Use the individual functions only when you need custom retry logic,
-//    progress bars, or want to save the mid to a database mid-way.
 
-async function demonstrateUploadAndPoll(): Promise<void> {
+async function withUploadAndPoll(): Promise<void> {
   console.log('\n━━ uploadAndPoll() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  const processedMedia = await client.uploadAndPoll(
-    'file:///path/to/selfie.jpg',
-    'FI-1',
-    {
-      faceswapCheck: true,     // ← only flag needed for this check
-    },
-  );
+  const media = await client.uploadAndPoll(VIDEO_URI, 'FI-1', {
+    faceswapCheck: true,
+  }) as ProcessedMedia;
 
-  console.log('mid:           ', processedMedia.mid);
-  console.log('status:        ', processedMedia.status);
-  console.log('isDeepFake:    ', processedMedia.result?.isDeepFake);
+  console.log('id        :', media.id);
+  console.log('status    :', media.status);
+  console.log('isDeepFake:', media.result?.isDeepFake);  // false = real, true = AI-swapped
 
-  //  ─── OUTPUT ───────────────────────────────────────────────────────────────
-  //
-  //  mid:            "64a3f1c2b8e9d07f3c1a5e22"
-  //  status:         "PROCESSED"
-  //  isDeepFake:     true
-  //
-  //  ─── WHAT THIS MEANS ──────────────────────────────────────────────────────
-  //
-  //  This is the same final answer as the step-by-step approach in cells 2–5,
-  //  but done in one line. Use this in production code.
+  //  ─── RESULT FIELDS (FI-1 faceswap) ──────────────────────────────────────
+  //  isDeepFake → true means face-swap manipulation was detected
 }
 
 
-// Alternative approach: use the function verify_deepfake() which is a shortcut for uploadAndPoll() with faceswapCheck: true. It returns a boolean directly instead of the full media record.
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │  OPTION B — verify_deepfake()  (shortcut wrapper)                       │
+// └─────────────────────────────────────────────────────────────────────────┘
 
-async function demonstrateVerifyFaceswap(): Promise<void> {
-  console.log('\n━━ verifyFaceswap() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+async function withVerifyHelper(): Promise<void> {
+  console.log('\n━━ verify_deepfake() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  const isFaceswap = await client.verify_deepfake('file:///path/to/selfie.jpg');
+  const result: DetectionResult = await client.verify_deepfake(VIDEO_URI);
 
-  console.log('Result:    ', isFaceswap);
-
-  //  ─── OUTPUT ───────────────────────────────────────────────────────────────
-  //
-  //  isDeepFake:     true
-  //
-  //  ─── WHAT THIS MEANS ──────────────────────────────────────────────────────
-  //
-  //  This is a simpler alternative to uploadAndPoll() if you only care about faceswap. It returns true/false directly.
+  console.log('isDeepFake:', result.isDeepFake);
 }
 
 
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │  OPTION C — step by step                                                │
+// └─────────────────────────────────────────────────────────────────────────┘
+
+async function stepByStep(): Promise<void> {
+  console.log('\n━━ step by step ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  const meta = await client.upload(VIDEO_URI, 'FI-1', { faceswapCheck: true });
+  console.log('job id:', meta.job.id);
+
+  await client.finalizeMedia(meta.job.id);
+
+  const media = await client.pollResult(meta.job.id);
+  console.log('status:', media.status);
+
+  const result = await client.getResult(media);
+  console.log('isDeepFake:', result.isDeepFake);
+}
 
 
+async function main() {
+  await withUploadAndPoll();
+  await withVerifyHelper();
+  await stepByStep();
+}
+
+main().catch(console.error);

@@ -5,11 +5,7 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.ts'],
   globals: {
     'ts-jest': {
-      tsconfig: {
-        esModuleInterop: true,
-        skipLibCheck: true,
-        noImplicitAny: false,
-      },
+      tsconfig: 'tsconfig.test.json',
     },
   },
   moduleFileExtensions: ['ts', 'js', 'json', 'node'],

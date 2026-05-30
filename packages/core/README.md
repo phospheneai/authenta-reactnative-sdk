@@ -2,7 +2,7 @@
 
 Pure TypeScript API client for the [Authenta](https://authenta.ai) eKYC platform. Works in **Node.js** and **React Native** — no native modules or UI dependencies.
 
-Use this package directly if you want headless control over uploads, polling, and result retrieval. For a ready-made camera capture UI, use [`@authenta/react-native`](https://www.npmjs.com/package/@authenta/react-native).
+Use this package directly when you want headless control over uploads, polling, and results. For a ready-made camera capture UI, use [`@authenta/react-native`](https://www.npmjs.com/package/@authenta/react-native).
 
 ---
 
@@ -10,12 +10,14 @@ Use this package directly if you want headless control over uploads, polling, an
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [AuthentaClient](#authentaclient)
-  - [Configuration](#configuration)
+- [Client Setup](#client-setup)
+- [High-level API](#high-level-api)
   - [uploadAndPoll()](#uploadandpoll)
   - [RunOptions](#runoptions)
-  - [Low-level API](#low-level-api)
+  - [Convenience wrappers](#convenience-wrappers)
+- [Low-level API](#low-level-api)
 - [Models](#models)
+- [Result fields](#result-fields)
 - [Error Handling](#error-handling)
 - [TypeScript Types](#typescript-types)
 
@@ -27,7 +29,7 @@ Use this package directly if you want headless control over uploads, polling, an
 npm install @authenta/core
 ```
 
-No peer dependencies. Works out of the box in Node.js >= 16 and React Native >= 0.72.
+No peer dependencies. Works in Node.js ≥ 16 and React Native ≥ 0.72.
 
 ---
 
@@ -37,111 +39,100 @@ No peer dependencies. Works out of the box in Node.js >= 16 and React Native >= 
 import { AuthentaClient } from '@authenta/core';
 
 const client = new AuthentaClient({
-  clientId:     'YOUR_CLIENT_ID',
-  clientSecret: 'YOUR_CLIENT_SECRET',
+  api_key:      'YOUR_API_KEY',
+  auth_enabled: true,
 });
 
-const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
+// FI-1 liveness check
+const media = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
   livenessCheck: true,
 });
 
-console.log(result.result?.isLiveness);   // true | false
-console.log(result.status);               // "PROCESSED"
+console.log(media.status);          // "completed"
+console.log(media.result?.isSpoof); // false = live person
 ```
 
 ---
 
-## AuthentaClient
-
-### Configuration
+## Client Setup
 
 ```ts
 const client = new AuthentaClient({
-  clientId:     'YOUR_CLIENT_ID',       // required
-  clientSecret: 'YOUR_CLIENT_SECRET',   // required
+  api_key:      'YOUR_API_KEY',       // required
+  auth_enabled: true,                  // set true when api_key is provided
   baseUrl:      'https://platform.authenta.ai', // optional — default shown
 });
 ```
 
 | Option | Type | Required | Description |
 |---|---|---|---|
-| `clientId` | `string` | Yes | Your Authenta client ID |
-| `clientSecret` | `string` | Yes | Your Authenta client secret |
+| `api_key` | `string` | Yes | Your Authenta API key |
+| `auth_enabled` | `boolean` | Yes | Pass `true` to include the Bearer token on every request |
 | `baseUrl` | `string` | No | API base URL (default: `https://platform.authenta.ai`) |
 
 ---
 
+## High-level API
+
 ### uploadAndPoll()
 
-The primary high-level method. Uploads the file, polls until processing is complete, fetches the detection result, and returns a `ProcessedMedia` object.
+The primary method. Runs the full pipeline — upload → finalize → poll → fetch result — and returns a `ProcessedMedia` object.
 
 ```ts
-const result = await client.uploadAndPoll(uri, modelType, options);
+const media = await client.uploadAndPoll(uri, modelType, options);
 ```
-
-**Parameters**
 
 | Parameter | Type | Description |
 |---|---|---|
 | `uri` | `string` | `file://` URI of the photo or video to analyse |
-| `modelType` | `ModelType` | Model to run (e.g. `'FI-1'`) |
-| `options` | `RunOptions` | Detection options — see [RunOptions](#runoptions) |
+| `modelType` | `ModelType` | Model to run — e.g. `'FI-1'`, `'DF-1'`, `'AC-1'`, `'FE-1'` |
+| `options` | `RunOptions` | Detection flags and polling config |
+
+**Returns** `Promise<ProcessedMedia>` when `autoPolling: true` (default), or `Promise<CreateMediaResponse>` when `autoPolling: false`.
 
 **Examples**
 
 ```ts
 // Liveness check — photo
-const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
+const media = await client.uploadAndPoll('file:///selfie.jpg', 'FI-1', {
   livenessCheck: true,
 });
+console.log(media.result?.isSpoof); // false = live person
 
-// Faceswap check — video
-const result = await client.uploadAndPoll('file:///path/to/clip.mp4', 'FI-1', {
+// Faceswap / deepfake check — video only
+const media = await client.uploadAndPoll('file:///clip.mp4', 'FI-1', {
   faceswapCheck: true,
 });
+console.log(media.result?.isDeepFake);
 
-// Liveness + faceswap — video
-const result = await client.uploadAndPoll('file:///path/to/clip.mp4', 'FI-1', {
-  livenessCheck: true,
-  faceswapCheck: true,
-});
-
-// Face similarity — photo + reference
-const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
+// Face similarity — photo + reference image
+const media = await client.uploadAndPoll('file:///selfie.jpg', 'FI-1', {
   faceSimilarityCheck: true,
-  referenceImage: 'file:///path/to/id-photo.jpg',
+  referenceImage:      'file:///id-photo.jpg',
 });
+console.log(media.result?.isSimilar, media.result?.similarityScore);
 
-// Liveness + face similarity — photo
-const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
-  livenessCheck: true,
+// Liveness + similarity combined — photo
+const media = await client.uploadAndPoll('file:///selfie.jpg', 'FI-1', {
+  livenessCheck:       true,
   faceSimilarityCheck: true,
-  referenceImage: 'file:///path/to/id-photo.jpg',
+  referenceImage:      'file:///id-photo.jpg',
 });
-```
 
-**Returns** `Promise<ProcessedMedia>`
+// DF-1 deepfake detection — video
+const media = await client.uploadAndPoll('file:///clip.mp4', 'DF-1');
+console.log(media.result?.isDeepFake);
 
-```ts
-{
-  mid:         string;       // unique media ID
-  name:        string;
-  status:      'PROCESSED';  // always PROCESSED on success
-  modelType:   string;       // e.g. "FI-1"
-  contentType: string;       // MIME type of the uploaded file
-  size:        number;       // file size in bytes
-  createdAt:   string;       // ISO 8601
-  srcURL?:     string;
-  resultURL?:  string;
-  result?: {
-    resultType:       string;
-    isLiveness?:      boolean | string;   // liveness check result
-    isDeepFake?:      boolean | string;   // faceswap / deepfake result
-    isSimilar?:       boolean | string;   // face similarity result
-    similarityScore?: number  | string;   // 0–100
-    [key: string]:    any;
-  };
-}
+// FE-1 face embeddings — photo
+const media = await client.uploadAndPoll('file:///selfie.jpg', 'FE-1');
+console.log(media.result?.faceVector);
+
+// Return immediately after upload (no polling)
+const meta = await client.uploadAndPoll('file:///selfie.jpg', 'FI-1', {
+  livenessCheck: true,
+  autoPolling:   false,
+});
+console.log(meta.job.id); // use this id to poll later
 ```
 
 ---
@@ -150,60 +141,113 @@ const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', 
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `livenessCheck` | `boolean` | `false` | Run liveness check (FI-1) |
-| `faceswapCheck` | `boolean` | `false` | Run faceswap / deepfake check (FI-1, video required) |
-| `faceSimilarityCheck` | `boolean` | `false` | Run face similarity check (FI-1, photo + reference required) |
-| `referenceImage` | `string` | — | `file://` URI of reference face image (required when `faceSimilarityCheck: true`) |
-| `isSingleFace` | `boolean` | `true` | Hint that only one face is present |
-| `autoPolling` | `boolean` | `true` | Wait for result before returning. Set `false` to return immediately after upload |
-| `interval` | `number` | `5000` | Polling interval in milliseconds |
-| `timeout` | `number` | `600000` | Max polling duration in milliseconds (10 min) |
+| `livenessCheck` | `boolean` | `false` | Run liveness check — FI-1 only |
+| `faceswapCheck` | `boolean` | `false` | Run faceswap/deepfake check — FI-1, video required |
+| `faceSimilarityCheck` | `boolean` | `false` | Run face similarity — FI-1, photo + `referenceImage` required |
+| `referenceImage` | `string` | — | `file://` URI of the reference face image |
+| `isSingleFace` | `boolean` | `true` | Hint that only one face is present in the frame |
+| `autoPolling` | `boolean` | `true` | Set `false` to return after upload without waiting for the result |
+| `interval` | `number` | `5000` | Polling interval in ms |
+| `timeout` | `number` | `600000` | Max total polling time in ms (10 min) |
 
-**Check compatibility**
+**Check compatibility — FI-1**
 
-| Check | Input required | Can combine with |
+| Checks | Input | Can combine with |
 |---|---|---|
-| `livenessCheck` | Photo **or** video | `faceSimilarityCheck` |
+| `livenessCheck` | Photo or video | `faceSimilarityCheck` |
 | `faceswapCheck` | Video (max 10 s) | `livenessCheck` |
 | `faceSimilarityCheck` | Photo + `referenceImage` | `livenessCheck` |
-| `faceswapCheck` + `faceSimilarityCheck` | — | **Not allowed** |
+| `faceswapCheck` + `faceSimilarityCheck` | — | Not allowed — SDK throws `ValidationError` |
 
 ---
 
-### Low-level API
+### Convenience wrappers
 
-Call each step individually for full control:
+Shorthand methods that return only the `DetectionResult` (no job wrapper):
 
 ```ts
-// 1. Upload — creates a media record and uploads the file to S3
-const media = await client.upload('file:///path/to/selfie.jpg', 'FI-1', {
+// FI-1 — liveness
+const result = await client.verify_liveness('file:///selfie.jpg');
+console.log(result.isSpoof); // false = live
+
+// FI-1 — faceswap (video only)
+const result = await client.verify_deepfake('file:///clip.mp4');
+console.log(result.isDeepFake);
+
+// FI-1 — face similarity (photo + reference)
+const result = await client.verify_similarity('file:///selfie.jpg', 'file:///id-photo.jpg');
+console.log(result.isSimilar, result.similarityScore);
+
+// FE-1 — face embeddings
+const result = await client.verify_face_embeddings('file:///selfie.jpg');
+console.log(result.faceVector);
+```
+
+---
+
+## Low-level API
+
+Call each step individually for custom progress tracking, retry logic, or saving the job ID mid-flow.
+
+```ts
+// 1. Create a job record + get S3 upload URLs
+const meta = await client.upload('file:///selfie.jpg', 'FI-1', {
   livenessCheck: true,
 });
-console.log(media.mid); // "abc-123"
+console.log(meta.job.id);     // e.g. "2710"
+console.log(meta.job.status); // "initiated"
+// meta.inputs[0].uploadUrl  — signed PUT URL for the original file
+// meta.inputs[1].uploadUrl  — signed PUT URL for the reference (similarity only)
 
-// 2. Poll until processing completes
-const processed = await client.pollResult(media.mid, {
-  interval: 3000,    // poll every 3 s
-  timeout:  120000,  // give up after 2 min
+// 2. Tell the server all files are uploaded — job moves to "queued"
+await client.finalizeMedia(meta.job.id);
+
+// 3. Poll until the AI finishes
+const media = await client.pollResult(meta.job.id, {
+  interval: 3_000,    // check every 3 s
+  timeout:  120_000,  // give up after 2 min
 });
+console.log(media.status); // "completed"
 
-// 3. Fetch the detection result from resultURL
-const result = await client.getResult(processed);
-console.log(result.isLiveness, result.isDeepFake);
+// 4. Download the full result JSON from the S3 artifact
+const result = await client.getResult(media);
+console.log(result.isSpoof, result.isDeepFake, result.isSimilar);
 
-// CRUD helpers
-const record = await client.getMedia(mid);
-const list   = await client.listMedia({ page: 1, pageSize: 20 });
-await client.deleteMedia(mid);
+// ── CRUD helpers ──────────────────────────────────────────────────────────
+
+const job  = await client.getMedia('2710');
+const list = await client.listMedia({ page: 1, pageSize: 20 });
+await client.deleteMedia('2710');
+
+// Task-type ID lookup
+const taskId = await client.get_task_id('FI-1'); // "8"
 ```
 
 ---
 
 ## Models
 
-| Model ID | Description | Input |
+| Model ID | Task | Input |
 |---|---|---|
-| `FI-1` | Face Intelligence — liveness, faceswap, face similarity | Photo or video |
+| `FI-1` | Face Intelligence — liveness, faceswap, similarity | Photo or video |
+| `FE-1` | Face Embeddings — numeric face vector | Photo |
+| `DF-1` | Deepfake detection | Video |
+| `AC-1` | AI-generated image detection | Photo |
+
+---
+
+## Result fields
+
+`DetectionResult` fields populated per model and check:
+
+| Field | Type | Populated by |
+|---|---|---|
+| `isSpoof` | `boolean \| string` | FI-1 liveness check |
+| `isDeepFake` | `boolean \| string` | FI-1 faceswap, DF-1 |
+| `isSimilar` | `boolean \| string` | FI-1 similarity check |
+| `similarityScore` | `number \| string` | FI-1 similarity check |
+| `faceVector` | `number[]` | FE-1 |
+| `RealConfidencePercent` | `number \| string` | DF-1, AC-1 |
 
 ---
 
@@ -223,18 +267,18 @@ import {
 } from '@authenta/core';
 
 try {
-  const result = await client.uploadAndPoll(uri, 'FI-1', { livenessCheck: true });
+  const media = await client.uploadAndPoll(uri, 'FI-1', { livenessCheck: true });
 } catch (err) {
   if (err instanceof AuthenticationError) {
-    // Invalid clientId / clientSecret — check your credentials
+    // Invalid api_key — code: "IAM001"
   } else if (err instanceof AuthorizationError) {
-    // Account lacks permission for this operation
+    // Account lacks permission — code: "IAM002"
   } else if (err instanceof QuotaExceededError) {
-    // Monthly quota exceeded
+    // Monthly quota exceeded — code: "AA001"
   } else if (err instanceof InsufficientCreditsError) {
-    // No remaining credits
+    // No remaining credits — code: "U007"
   } else if (err instanceof ValidationError) {
-    // Bad input — see err.message for details
+    // Bad input — see err.message
     console.error(err.message, err.code, err.statusCode);
   } else if (err instanceof ServerError) {
     // Platform error — safe to retry
@@ -244,8 +288,6 @@ try {
   }
 }
 ```
-
-**Error properties**
 
 | Property | Type | Description |
 |---|---|---|
@@ -258,24 +300,73 @@ try {
 
 ## TypeScript Types
 
-All public types are exported from the package entry point:
-
 ```ts
 import type {
   AuthentaClientConfig,
   ModelType,
   MediaStatus,
-  FileInfo,
   FIOptions,
   RunOptions,
   PollingOptions,
   CreateMediaResponse,
-  MediaRecord,
+  UploadInput,
+  ListMediaParams,
   ListMediaResponse,
   DetectionResult,
   ProcessedMedia,
+  Artifact,
+  TaskType,
 } from '@authenta/core';
 ```
+
+**Key shapes**
+
+```ts
+// Returned by upload() / uploadAndPoll({ autoPolling: false })
+interface CreateMediaResponse {
+  job: {
+    id:         string;
+    tenantId:   string;
+    taskTypeId: string;
+    status:     string;   // "initiated"
+    cost:       number;
+    createdAt:  string;
+    updatedAt:  string;
+    result:     null;
+  };
+  inputs: Array<{
+    slotName:           'original' | 'reference';
+    uploadUrl:          string;
+    uploadUrlExpiresAt: string;
+  }>;
+}
+
+// Returned by pollResult() / uploadAndPoll() after processing
+interface ProcessedMedia {
+  id:         string;
+  tenantId:   string;
+  taskTypeId: string;
+  status:     MediaStatus;  // "completed" | "queued" | "processing" | ...
+  cost:       number;
+  createdAt:  string;
+  updatedAt:  string;
+  result:     DetectionResult | null;
+  artifacts:  Artifact[];
+  taskType:   TaskType;
+}
+
+// Detection result — fields depend on which checks were run
+interface DetectionResult {
+  isSpoof?:              boolean | string;
+  isDeepFake?:           boolean | string;
+  isSimilar?:            boolean | string;
+  similarityScore?:      number  | string;
+  faceVector?:           number[];
+  RealConfidencePercent?: number | string;
+  [key: string]: any;
+}
+```
+
 ---
 
 ## License

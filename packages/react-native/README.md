@@ -1,6 +1,6 @@
 # @authenta/react-native
 
-React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC platform. Wraps [`@authenta/core`](https://www.npmjs.com/package/@authenta/core) in a self-contained modal — your app only passes which checks to enable and receives the result.
+React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC platform. Wraps [`@authenta/core`](https://www.npmjs.com/package/@authenta/core) in a self-contained modal — your app only decides which checks to enable and receives the result.
 
 ---
 
@@ -15,7 +15,6 @@ React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC plat
   - [Props](#props)
   - [Check Modes & Capture Rules](#check-modes--capture-rules)
   - [Result Object](#result-object)
-  - [Full Example](#full-example)
 - [Using AuthentaClient Directly](#using-authentaclient-directly)
 - [Error Handling](#error-handling)
 - [TypeScript Types](#typescript-types)
@@ -26,10 +25,11 @@ React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC plat
 
 | Dependency | Version |
 |---|---|
-| React Native | >= 0.72 |
-| React | >= 18 |
-| react-native-vision-camera | >= 4 |
-| react-native-image-picker | >= 7 |
+| React Native | ≥ 0.72 |
+| React | ≥ 18 |
+| react-native-vision-camera | ≥ 5 |
+| react-native-image-picker | ≥ 7 |
+| react-native-blob-util | ≥ 0.19 |
 
 ---
 
@@ -39,27 +39,25 @@ React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC plat
 npm install @authenta/react-native
 ```
 
-This installs `@authenta/core`, `react-native-vision-camera`, and `react-native-image-picker` automatically.
+This pulls in `@authenta/core`, `react-native-vision-camera`, `react-native-image-picker`, and `react-native-blob-util` automatically.
 
-After installation, rebuild your app to link the native modules:
+After installation, link the native modules:
 
 ```bash
-# Android
-cd android && ./gradlew clean && cd ..
-npx react-native run-android
-
 # iOS
 cd ios && pod install && cd ..
 npx react-native run-ios
+
+# Android
+cd android && ./gradlew clean && cd ..
+npx react-native run-android
 ```
 
 ---
 
 ## Android Setup
 
-### 1. Permissions
-
-In `android/app/src/main/AndroidManifest.xml`, inside `<manifest>`:
+Add to `android/app/src/main/AndroidManifest.xml` inside `<manifest>`:
 
 ```xml
 <uses-permission android:name="android.permission.CAMERA" />
@@ -67,26 +65,11 @@ In `android/app/src/main/AndroidManifest.xml`, inside `<manifest>`:
 <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 ```
 
-### 2. Build
-
-```bash
-cd android && ./gradlew clean && cd ..
-npx react-native run-android
-```
-
 ---
 
 ## iOS Setup
 
-### 1. Install pods
-
-```bash
-cd ios && pod install && cd ..
-```
-
-### 2. Info.plist permissions
-
-In `ios/<AppName>/Info.plist`:
+Add to `ios/<AppName>/Info.plist`:
 
 ```xml
 <key>NSCameraUsageDescription</key>
@@ -97,12 +80,6 @@ In `ios/<AppName>/Info.plist`:
 <string>Photo library access is required to select a reference image.</string>
 ```
 
-### 3. Build
-
-```bash
-npx react-native run-ios
-```
-
 ---
 
 ## Quick Start
@@ -110,13 +87,14 @@ npx react-native run-ios
 ```tsx
 import React, { useState } from 'react';
 import { Button, View } from 'react-native';
+import { AuthentaClient } from '@authenta/core';
 import { AuthentaCapture } from '@authenta/react-native';
-import type { ProcessedMedia, AuthentaClient } from '@authenta/core';
+import type { ProcessedMedia } from '@authenta/core';
 
-// Create the client once — outside your component or in a context/singleton
+// Create once — outside your component or in a context/singleton
 const client = new AuthentaClient({
-  clientId:     'YOUR_CLIENT_ID',
-  clientSecret: 'YOUR_CLIENT_SECRET',
+  api_key:      'YOUR_API_KEY',
+  auth_enabled: true,
 });
 
 export default function App() {
@@ -130,16 +108,18 @@ export default function App() {
         client={client}
         modelType="FI-1"
         visible={visible}
+        livenessCheck={true}
         onClose={() => setVisible(false)}
-        onResult={(result: ProcessedMedia) => {
+        onResult={(media: ProcessedMedia) => {
           setVisible(false);
-          console.log(result.result?.isLiveness);
+          console.log(media.result?.isSpoof);       // liveness
+          console.log(media.result?.isDeepFake);    // faceswap
+          console.log(media.result?.isSimilar);     // similarity
         }}
         onError={(err) => {
           setVisible(false);
           console.error(err.message);
         }}
-        livenessCheck={true}
       />
     </View>
   );
@@ -152,54 +132,40 @@ export default function App() {
 
 `AuthentaCapture` is a self-contained modal that handles the entire eKYC capture flow:
 
-1. **Toggles** — user enables which checks to run (or you pre-set them via props)
-2. **Reference image** — user picks a face photo from their library (only when `faceSimilarityCheck` is on)
-3. **Camera** — live camera view with capture / record button and front/back flip
-4. **Processing** — upload → polling → result fetch, all handled internally
-5. **Result / Error** — shows the outcome; user gets up to 3 retry attempts
-
-```tsx
-<AuthentaCapture
-  client={client}
-  visible={visible}
-  onClose={() => setVisible(false)}
-  onResult={(result) => console.log(result)}
-  onError={(err) => console.error(err)}
-  livenessCheck={true}
-  faceswapCheck={false}
-  faceSimilarityCheck={false}
-  modelType="FI-1"
-/>
-```
+1. **Toggles** — user enables which checks to run (or pre-set via props)
+2. **Reference image** — user picks a face photo from their library (only when `faceSimilarityCheck` is enabled)
+3. **Camera** — live camera view with capture/record buttons and front/back flip
+4. **Processing** — upload → finalize → polling → result fetch, all handled internally
+5. **Result / Error** — shows the outcome; up to 3 retry attempts on failure
 
 ### Props
 
 | Prop | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `client` | `AuthentaClient` | Yes | — | Initialized client instance from `@authenta/core` |
+| `client` | `AuthentaClient` | Yes | — | Initialized client from `@authenta/core` |
 | `visible` | `boolean` | Yes | — | Controls modal open/close |
 | `onClose` | `() => void` | Yes | — | Called when the user dismisses the modal |
-| `onResult` | `(result: ProcessedMedia) => void` | Yes | — | Called with the detection result on success |
+| `onResult` | `(result: ProcessedMedia) => void` | Yes | — | Called with the job result on success |
 | `onError` | `(error: Error \| AuthentaError) => void` | No | — | Called on capture or API errors |
-| `modelType` | `ModelType` | No | `'FI-1'` | Model to run against |
-| `livenessCheck` | `boolean` | No | `false` | Pre-enable the liveness check toggle |
-| `faceswapCheck` | `boolean` | No | `false` | Pre-enable the faceswap check toggle |
-| `faceSimilarityCheck` | `boolean` | No | `false` | Pre-enable the face similarity check toggle |
+| `modelType` | `ModelType` | No | `'FI-1'` | Model to run |
+| `livenessCheck` | `boolean` | No | `false` | Pre-enable liveness check |
+| `faceswapCheck` | `boolean` | No | `false` | Pre-enable faceswap check |
+| `faceSimilarityCheck` | `boolean` | No | `false` | Pre-enable face similarity check |
 
 ### Check Modes & Capture Rules
 
-The active checks determine which capture mode is presented to the user. The SDK enforces these rules automatically — no extra validation needed in your app.
+The SDK automatically selects the correct capture mode based on which checks are enabled:
 
-| Checks enabled | Capture presented | Notes |
+| Checks enabled | Capture mode | Notes |
 |---|---|---|
 | `livenessCheck` only | Photo **and** video — user chooses | Both buttons shown side by side |
 | `faceswapCheck` only | Video only (max 10 s) | |
-| `faceSimilarityCheck` only | Photo only | Reference image required |
+| `faceSimilarityCheck` only | Photo only | Reference image picker appears first |
 | `faceswapCheck` + `livenessCheck` | Video only | faceswap takes priority |
 | `livenessCheck` + `faceSimilarityCheck` | Photo only | similarity takes priority |
-| `faceswapCheck` + `faceSimilarityCheck` | — | **Not allowed** — SDK shows an error |
+| `faceswapCheck` + `faceSimilarityCheck` | — | Not allowed — SDK shows an error |
 
-The user can also flip between front and back camera at any time during capture (except while recording).
+The user can flip between front and back camera at any time (except while recording).
 
 ### Result Object
 
@@ -207,64 +173,75 @@ The user can also flip between front and back camera at any time during capture 
 
 ```ts
 {
-  mid:         string;       // unique media ID
-  name:        string;
-  status:      'PROCESSED';
-  modelType:   string;       // e.g. "FI-1"
-  contentType: string;       // MIME type of the uploaded file
-  size:        number;       // bytes
-  createdAt:   string;       // ISO 8601
-  srcURL?:     string;
-  resultURL?:  string;
-  result?: {
-    resultType:       string;
-    isLiveness?:      boolean | string;   // liveness result
-    isDeepFake?:      boolean | string;   // faceswap / deepfake result
-    isSimilar?:       boolean | string;   // face similarity result
-    similarityScore?: number  | string;   // 0–100
+  id:         string;        // job ID — e.g. "2710"
+  tenantId:   string;
+  taskTypeId: string;        // e.g. "8" for FI-1
+  status:     string;        // "completed"
+  cost:       number;
+  createdAt:  string;        // ISO 8601
+  updatedAt:  string;
+  result: {
+    isSpoof?:         boolean | string;  // liveness check
+    isDeepFake?:      boolean | string;  // faceswap check
+    isSimilar?:       boolean | string;  // similarity check
+    similarityScore?: number  | string;  // similarity confidence
     [key: string]:    any;
-  };
+  } | null;
+  artifacts: Artifact[];
+  taskType:  TaskType;
 }
 ```
-
-### Full Example
-
-See the [AuthentaDemo](../../AuthentaDemo/) app for a complete runnable integration:
-- Toggle switches for each check
-- Start button and result display
-- Error display with retry
 
 ---
 
 ## Using AuthentaClient Directly
 
-`@authenta/react-native` re-exports the full `AuthentaClient` API from `@authenta/core`. Use it headless if you want your own camera UI.
+`@authenta/react-native` re-exports the full `AuthentaClient` API so you only need one import. Use it headless if you have your own camera UI.
 
 ```ts
-import { AuthentaClient } from '@authenta/core';
+import { AuthentaClient } from '@authenta/react-native'; // or '@authenta/core'
 
 const client = new AuthentaClient({
-  clientId:     'YOUR_CLIENT_ID',
-  clientSecret: 'YOUR_CLIENT_SECRET',
+  api_key:      'YOUR_API_KEY',
+  auth_enabled: true,
 });
 
-// High-level: upload + poll + result in one call
-const result = await client.uploadAndPoll('file:///path/to/selfie.jpg', 'FI-1', {
+// ── High-level ────────────────────────────────────────────────────────────
+
+const media = await client.uploadAndPoll('file:///selfie.jpg', 'FI-1', {
   livenessCheck: true,
 });
+console.log(media.result?.isSpoof);
 
-// Low-level
-const media     = await client.upload(uri, 'FI-1', { livenessCheck: true });
-const processed = await client.pollResult(media.mid);
-const result    = await client.getResult(processed);
+// ── Convenience wrappers ─────────────────────────────────────────────────
 
-// CRUD
-const record = await client.getMedia(mid);
-const list   = await client.listMedia({ page: 1, pageSize: 20 });
-await client.deleteMedia(mid);
+const r1 = await client.verify_liveness('file:///selfie.jpg');
+const r2 = await client.verify_deepfake('file:///clip.mp4');
+const r3 = await client.verify_similarity('file:///selfie.jpg', 'file:///id-photo.jpg');
+const r4 = await client.verify_face_embeddings('file:///selfie.jpg');
+
+// ── Low-level (step by step) ─────────────────────────────────────────────
+
+const meta = await client.upload('file:///selfie.jpg', 'FI-1', { livenessCheck: true });
+// meta.job.id       — job ID to poll
+// meta.inputs[0]    — signed S3 URL for the original file
+
+await client.finalizeMedia(meta.job.id);
+
+const processed = await client.pollResult(meta.job.id, {
+  interval: 3_000,
+  timeout:  120_000,
+});
+const result = await client.getResult(processed);
+
+// ── CRUD ─────────────────────────────────────────────────────────────────
+
+const job  = await client.getMedia('2710');
+const list = await client.listMedia({ page: 1, pageSize: 20 });
+await client.deleteMedia('2710');
 ```
 
-See the [`@authenta/core` README](https://www.npmjs.com/package/@authenta/core) for the full `AuthentaClient` API reference and all `RunOptions`.
+See the [`@authenta/core` README](https://www.npmjs.com/package/@authenta/core) for the full API reference and all `RunOptions`.
 
 ---
 
@@ -281,26 +258,22 @@ import {
   ServerError,
 } from '@authenta/react-native';
 
-// In onError prop or try/catch around uploadAndPoll()
 if (err instanceof AuthenticationError) {
-  // Invalid clientId / clientSecret
+  // Invalid api_key — code: "IAM001"
 } else if (err instanceof AuthorizationError) {
-  // Account lacks permission
+  // Account lacks permission — code: "IAM002"
 } else if (err instanceof QuotaExceededError) {
-  // Monthly quota exceeded
+  // Monthly quota exceeded — code: "AA001"
 } else if (err instanceof InsufficientCreditsError) {
-  // No remaining credits
+  // No remaining credits — code: "U007"
 } else if (err instanceof ValidationError) {
   // Bad input — see err.message
 } else if (err instanceof ServerError) {
   // Platform error — safe to retry
 } else if (err instanceof AuthentaError) {
-  // Base class — all SDK errors extend this
   console.error(err.message, err.code, err.statusCode, err.details);
 }
 ```
-
-**Error properties**
 
 | Property | Type | Description |
 |---|---|---|
@@ -308,6 +281,28 @@ if (err instanceof AuthenticationError) {
 | `code` | `string?` | API error code (e.g. `IAM001`) |
 | `statusCode` | `number?` | HTTP status code |
 | `details` | `object?` | Raw API response body |
+
+---
+
+## TypeScript Types
+
+All types are re-exported from `@authenta/core`:
+
+```ts
+import type {
+  AuthentaClientConfig,
+  ModelType,
+  MediaStatus,
+  FIOptions,
+  RunOptions,
+  PollingOptions,
+  CreateMediaResponse,
+  DetectionResult,
+  ProcessedMedia,
+  Artifact,
+  TaskType,
+} from '@authenta/react-native';
+```
 
 ---
 

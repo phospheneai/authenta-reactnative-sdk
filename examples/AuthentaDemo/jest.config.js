@@ -9,7 +9,7 @@ module.exports = {
 
   // Tell Jest to transform these packages (they ship as ESM / raw TypeScript via symlink)
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native|react-native-vision-camera|react-native-image-picker)/)',
+    'node_modules/(?!(react-native|@react-native|react-native-vision-camera|react-native-image-picker|react-native-compressor)/)',
   ],
 
   setupFiles: [],

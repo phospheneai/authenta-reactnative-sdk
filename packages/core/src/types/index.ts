@@ -1,7 +1,10 @@
 // Supported model types (extensible with string & {})
 export type ModelType = 'DF-1' | 'AC-1' | 'FI-1' | (string & {});
 
-export type MediaStatus = 'PENDING' | 'PROCESSING' | 'PROCESSED' | 'FAILED' | 'ERROR';
+export type MediaStatus =
+  | 'completed' | 'queued' | 'pending' | 'processing' | 'processed' | 'failed' | 'error' | 'initiated'
+  | 'COMPLETED' | 'QUEUED' | 'PENDING' | 'PROCESSING' | 'PROCESSED' | 'FAILED' | 'ERROR'
+  | (string & {});
 
 // React Native file descriptor — matches output from image/document pickers
 export interface FileInfo {
@@ -28,33 +31,33 @@ export interface PollingOptions {
 // Options for uploadAndPoll() — FI-1 fields are validated and used only when modelType is "FI-1"
 export interface RunOptions extends FIOptions, PollingOptions {
   autoPolling?: boolean; // default true — wait for result before returning
+  /** Override the MIME type detected from the file extension (e.g. 'video/mp4' when VisionCamera omits the extension). */
+  contentType?: string;
 }
 
-// POST /api/media response
+// POST /api/v1/jobs response
 export interface CreateMediaResponse {
-  mid: string;
-  name: string;
-  status: MediaStatus;
-  modelType: string;
-  contentType: string;
-  size: number;
-  createdAt: string;
-  uploadUrl: string;
-  referenceUploadUrl?: string;
+  job: {
+    id: string;
+    tenantId: string;
+    taskTypeId: string;
+    status: string;
+    cost: number;
+    createdAt: string;
+    updatedAt: string;
+    result: unknown | null;
+  };
+
+  inputs: UploadInput[];
 }
 
-// GET /api/media/{mid} response
-export interface MediaRecord {
-  mid: string;
-  name: string;
-  status: MediaStatus;
-  modelType: string;
-  contentType: string;
-  size: number;
-  createdAt: string;
-  srcURL?: string;
-  resultURL?: string;
+export interface UploadInput {
+  slotName: "original" | "reference";
+  uploadUrl: string;
+  uploadUrlExpiresAt: string;
 }
+
+
 
 export interface ListMediaParams {
   page?: number;
@@ -63,7 +66,7 @@ export interface ListMediaParams {
 }
 
 export interface ListMediaResponse {
-  items: MediaRecord[];
+  items: ProcessedMedia[];
   total?: number;
   page?: number;
   pageSize?: number;
@@ -74,7 +77,7 @@ export interface DetectionResult {
   resultType?: string;
   isDeepFake?: string | boolean;
   RealConfidencePercent?: string | number;
-  isLiveness?: string | boolean;
+  isSpoof?: string | boolean;
   isSimilar?: string | boolean;
   similarityScore?: string | number;
   identityPredictions?: IdentityPrediction[];
@@ -104,7 +107,50 @@ export interface BoundingBoxesMap {
   [identityId: string]: IdentityBoundingBox;
 }
 
-// Returned by uploadAndPoll() after polling completes
-export interface ProcessedMedia extends MediaRecord {
-  result?: DetectionResult;
+export interface Artifact {
+  id: string;
+  kind: "input" | "result";
+  slotName: string | null;
+  status: MediaStatus;
+  contentType: string;
+
+  metadata: Record<string, any>;
+
+  downloadUrl: string;
+  createdAt: string;
 }
+
+export interface InputSlot {
+  name: string;
+  mimes: string[];
+}
+
+export interface TaskType {
+  id: string;
+  slug: string;
+  displayName: string;
+  description: string;
+
+  inputSlots: InputSlot[];
+
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+
+// Returned by uploadAndPoll() after polling completes
+export interface ProcessedMedia {
+  id: string;
+  tenantId: string;
+  taskTypeId: string;
+  status: MediaStatus;
+  cost: number;
+  createdAt: string;
+  updatedAt: string;
+  result: DetectionResult | null;
+  artifacts: Artifact[];
+  taskType: TaskType;
+
+}
+

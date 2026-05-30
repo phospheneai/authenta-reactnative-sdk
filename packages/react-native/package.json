@@ -1,6 +1,6 @@
 {
   "name": "@authenta/react-native",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Authenta React Native SDK — camera capture UI powered by @authenta/core",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -16,11 +16,19 @@
     "type": "git",
     "url": "https://github.com/phospheneai/authenta-reactnative-sdk.git"
   },
-  "keywords": ["react-native", "authenta", "ekyc", "face", "liveness", "camera"],
+  "keywords": [
+    "react-native",
+    "authenta",
+    "ekyc",
+    "face",
+    "liveness",
+    "camera"
+  ],
   "author": "Authenta",
   "license": "MIT",
   "dependencies": {
-    "@authenta/core": "^1.0.4",
+    "@authenta/core": "^1.0.5",
+    "react-native-compressor": "^1.18.2",
     "react-native-image-picker": "^8.2.1",
     "react-native-nitro-image": "0.14.0",
     "react-native-nitro-modules": "0.35.6",

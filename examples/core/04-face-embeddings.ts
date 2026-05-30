@@ -1,95 +1,78 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  AUTHENTA CORE SDK  ·  FE-1 Model  ·  FACEEMBEDDINGS
-//  Every function in the SDK demonstrated one by one.
+//  AUTHENTA CORE SDK  ·  FE-1  ·  FACE EMBEDDINGS
 //
-//  HOW TO RUN THIS FILE
+//  HOW TO RUN
 //    npx ts-node examples/core/04-face-embeddings.ts
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━══
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { AuthentaClient } from '@authenta/core';
-import type { CreateMediaResponse, MediaRecord, DetectionResult } from '@authenta/core';
-
-
-// ┌─────────────────────────────────────────────────────────────────────────┐
-// │  CELL 1 — Create the client                                             │
-// └─────────────────────────────────────────────────────────────────────────┘
-//
-//  Before calling any function you need ONE client object.
-//  Think of it like a logged-in session — it holds your credentials
-//  so every call is automatically authenticated.
-//
-//  baseUrl      → the server address  (can leave it out, default is correct)
-//  clientId     → your organisation's unique ID  (from the Authenta dashboard)
-//  clientSecret → your private key   (never share this, never put it in git)
+import type { ProcessedMedia, DetectionResult } from '@authenta/core';
 
 const client = new AuthentaClient({
   baseUrl:      'https://platform.authenta.ai',
-  clientId:     '',
-  clientSecret: '',
+  api_key:      'YOUR_API_KEY',
+  auth_enabled: true,
 });
+
+const IMAGE_URI = 'file:///path/to/selfie.jpg';
 
 
 // ┌─────────────────────────────────────────────────────────────────────────┐
-// │  CELL 6 — uploadAndPoll()   ← the one function most apps use           │
+// │  OPTION A — uploadAndPoll()                                             │
 // └─────────────────────────────────────────────────────────────────────────┘
-//
-//  WHAT IT DOES
-//    Combines upload() + pollResult() + getResult() into a single call.
-//    You give it a file path and your options. It returns the final answer.
-//
-//    Internally it runs:
-//      Step 1 → upload()      (send file to cloud)
-//      Step 2 → pollResult()  (wait for AI to finish)
-//      Step 3 → getResult()   (download the answer)
-//
-//  WHEN TO USE THIS vs THE STEP-BY-STEP APPROACH
-//    Use uploadAndPoll() for 99% of cases — it is simpler.
-//    Use the individual functions only when you need custom retry logic,
-//    progress bars, or want to save the mid to a database mid-way.
 
-async function demonstrateUploadAndPoll(): Promise<void> {
+async function withUploadAndPoll(): Promise<void> {
   console.log('\n━━ uploadAndPoll() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  const processedMedia = await client.uploadAndPoll(
-    'file:///path/to/selfie.jpg',
-    'FE-1',
-  );
+  // FE-1 takes no extra options — just the model type
+  const media = await client.uploadAndPoll(IMAGE_URI, 'FE-1') as ProcessedMedia;
 
-  console.log('mid:           ', processedMedia.mid);
-  console.log('status:        ', processedMedia.status);
-  console.log('faceVector:    ', processedMedia.result?.faceVector);
+  console.log('id        :', media.id);
+  console.log('status    :', media.status);
+  console.log('faceVector:', media.result?.faceVector?.slice(0, 4), '...');
 
-  //  ─── OUTPUT ───────────────────────────────────────────────────────────────
-  //
-  //  mid:            "64a3f1c2b8e9d07f3c1a5e22"
-  //  status:         "PROCESSED"
-  //  faceVector:     [0.1, 0.2, 0.3, ...]
-  //
-  //  ─── WHAT THIS MEANS ──────────────────────────────────────────────────────
-  //
-  //  This is the same final answer as the step-by-step approach in cells 2–5,
-  //  but done in one line. Use this in production code.
+  //  ─── RESULT FIELDS (FE-1) ────────────────────────────────────────────────
+  //  faceVector → numeric embedding array; use cosine distance to compare faces
 }
 
 
-// Alternative approach: use the function verify_face_embeddings() which is a shortcut for uploadAndPoll() with FE-1 modeltype.
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │  OPTION B — verify_face_embeddings()  (shortcut wrapper)                │
+// └─────────────────────────────────────────────────────────────────────────┘
 
-async function demonstrate_verify_face_embeddings(): Promise<void> {
-  console.log('\n━━ verifyFaceEmbeddings() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+async function withVerifyHelper(): Promise<void> {
+  console.log('\n━━ verify_face_embeddings() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  const face_embeddings = await client.verify_face_embeddings('file:///path/to/selfie.jpg');
+  const result: DetectionResult = await client.verify_face_embeddings(IMAGE_URI);
 
-  console.log('Result:    ', face_embeddings);
-
-  //  ─── OUTPUT ───────────────────────────────────────────────────────────────
-  //
-  //  faceVector:     [0.1, 0.2, 0.3, ...]
-  //
-  //  ─── WHAT THIS MEANS ──────────────────────────────────────────────────────
-  //
-  //  This is a simpler alternative to uploadAndPoll() if you only care about face embeddings. It returns the face vector directly.
+  console.log('faceVector:', result.faceVector?.slice(0, 4), '...');
 }
 
 
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │  OPTION C — step by step                                                │
+// └─────────────────────────────────────────────────────────────────────────┘
+
+async function stepByStep(): Promise<void> {
+  console.log('\n━━ step by step ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  const meta = await client.upload(IMAGE_URI, 'FE-1');
+  console.log('job id:', meta.job.id);
+
+  await client.finalizeMedia(meta.job.id);
+
+  const media = await client.pollResult(meta.job.id);
+  console.log('status:', media.status);
+
+  const result = await client.getResult(media);
+  console.log('faceVector length:', result.faceVector?.length);
+}
 
 
+async function main() {
+  await withUploadAndPoll();
+  await withVerifyHelper();
+  await stepByStep();
+}
+
+main().catch(console.error);

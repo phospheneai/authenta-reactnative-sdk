@@ -1,95 +1,106 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  AUTHENTA CORE SDK  ·  FI-1 Model  ·  LIVENESS CHECK
-//  Every function in the SDK demonstrated one by one.
+//  AUTHENTA CORE SDK  ·  FI-1  ·  LIVENESS CHECK
 //
-//  HOW TO RUN THIS FILE
+//  HOW TO RUN
 //    npx ts-node examples/core/01-liveness-check.ts
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { AuthentaClient } from '@authenta/core';
-import type { CreateMediaResponse, MediaRecord, DetectionResult } from '@authenta/core';
-
+import type { ProcessedMedia, DetectionResult } from '@authenta/core';
 
 // ┌─────────────────────────────────────────────────────────────────────────┐
-// │  CELL 1 — Create the client                                             │
+// │  STEP 0 — Create the client (once per app lifetime)                     │
 // └─────────────────────────────────────────────────────────────────────────┘
 //
-//  Before calling any function you need ONE client object.
-//  Think of it like a logged-in session — it holds your credentials
-//  so every call is automatically authenticated.
-//
-//  baseUrl      → the server address  (can leave it out, default is correct)
-//  clientId     → your organisation's unique ID  (from the Authenta dashboard)
-//  clientSecret → your private key   (never share this, never put it in git)
+//  api_key       → your secret key from the Authenta dashboard
+//  auth_enabled  → set true whenever an api_key is provided
+//  baseUrl       → optional, default is correct for production
 
 const client = new AuthentaClient({
   baseUrl:      'https://platform.authenta.ai',
-  clientId:     '',
-  clientSecret: '',
+  api_key:      'YOUR_API_KEY',
+  auth_enabled: true,
 });
+
+const IMAGE_URI = 'file:///path/to/selfie.jpg';
 
 
 // ┌─────────────────────────────────────────────────────────────────────────┐
-// │  CELL 2 — uploadAndPoll()   ← the one function most apps use           │
+// │  OPTION A — uploadAndPoll()  (recommended for most cases)               │
 // └─────────────────────────────────────────────────────────────────────────┘
 //
-//  WHAT IT DOES
-//    Combines upload() + pollResult() + getResult() into a single call.
-//    You give it a file path and your options. It returns the final answer.
+//  Runs the full pipeline in one call:
+//    upload()  →  finalizeMedia()  →  pollResult()  →  getResult()
 //
-//    Internally it runs:
-//      Step 1 → upload()      (send file to cloud)
-//      Step 2 → pollResult()  (wait for AI to finish)
-//      Step 3 → getResult()   (download the answer)
-//
-//  WHEN TO USE THIS vs THE STEP-BY-STEP APPROACH
-//    Use uploadAndPoll() for 99% of cases — it is simpler.
-//    Use the individual functions only when you need custom retry logic,
-//    progress bars, or want to save the mid to a database mid-way.
+//  Returns a ProcessedMedia object with the result already embedded.
 
-async function demonstrateUploadAndPoll(): Promise<void> {
+async function withUploadAndPoll(): Promise<void> {
   console.log('\n━━ uploadAndPoll() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  const processedMedia = await client.uploadAndPoll(
-    'file:///path/to/selfie.jpg',
-    'FI-1',
-    {
-      livenessCheck: true,     // ← only flag needed for this check
-    },
-  );
+  const media = await client.uploadAndPoll(IMAGE_URI, 'FI-1', {
+    livenessCheck: true,
+  }) as ProcessedMedia;
 
-  console.log('mid:           ', processedMedia.mid);
-  console.log('status:        ', processedMedia.status);
-  console.log('isLiveness:    ', processedMedia.result?.isLiveness);
+  console.log('id     :', media.id);
+  console.log('status :', media.status);   // "completed"
+  console.log('isSpoof:', media.result?.isSpoof);  // false = live person
 
-  //  ─── OUTPUT ───────────────────────────────────────────────────────────────
-  //
-  //  mid:            "64a3f1c2b8e9d07f3c1a5e22"
-  //  status:         "PROCESSED"
-  //  isLiveness:     true
-  //
-  //  Use this in production code.
+  //  ─── RESULT FIELDS (FI-1 liveness) ──────────────────────────────────────
+  //  isSpoof  → false means the face is real (live), true means spoofed
 }
 
 
-// Alternative approach: use the function verify_liveness() which is a shortcut for uploadAndPoll() with livenessCheck: true. It returns a boolean directly instead of the full media record.
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │  OPTION B — verify_liveness()  (shortcut wrapper)                       │
+// └─────────────────────────────────────────────────────────────────────────┘
+//
+//  Identical to uploadAndPoll() with livenessCheck: true, but returns only
+//  the DetectionResult instead of the full ProcessedMedia wrapper.
 
-async function demonstrateVerifyLiveness(): Promise<void> {
-  console.log('\n━━ verifyLiveness() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+async function withVerifyHelper(): Promise<void> {
+  console.log('\n━━ verify_liveness() ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  const isLive = await client.verify_liveness('file:///path/to/selfie.jpg');
+  const result: DetectionResult = await client.verify_liveness(IMAGE_URI);
 
-  console.log('Result:    ', isLive);
-
-  //  ─── OUTPUT ───────────────────────────────────────────────────────────────
-  //
-  //  isLiveness:     true
-  //
-  //  ─── WHAT THIS MEANS ──────────────────────────────────────────────────────
-  //
-  //  This is a simpler alternative to uploadAndPoll() if you only care about liveness. It returns true/false directly.
+  console.log('isSpoof:', result.isSpoof);
 }
 
 
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │  OPTION C — step by step  (for progress bars / custom retry logic)      │
+// └─────────────────────────────────────────────────────────────────────────┘
+//
+//  Use the individual methods when you need to hook into each stage.
+
+async function stepByStep(): Promise<void> {
+  console.log('\n━━ step by step ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  // 1. Create a job and get the S3 upload URLs
+  const meta = await client.upload(IMAGE_URI, 'FI-1', { livenessCheck: true });
+  console.log('job id:', meta.job.id);
+  console.log('status after create:', meta.job.status);  // "initiated"
+
+  // 2. Signal the server that all files have been uploaded
+  await client.finalizeMedia(meta.job.id);
+  console.log('finalized — job is now queued');
+
+  // 3. Poll until the AI finishes
+  const media = await client.pollResult(meta.job.id, {
+    interval: 3_000,   // check every 3 s
+    timeout:  120_000, // give up after 2 min
+  });
+  console.log('status after processing:', media.status);  // "completed"
+
+  // 4. Download the result JSON from the S3 artifact
+  const result = await client.getResult(media);
+  console.log('isSpoof:', result.isSpoof);
+}
 
 
+async function main() {
+  await withUploadAndPoll();
+  await withVerifyHelper();
+  await stepByStep();
+}
+
+main().catch(console.error);
