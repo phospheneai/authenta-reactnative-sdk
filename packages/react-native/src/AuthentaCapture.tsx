@@ -152,7 +152,7 @@ export function AuthentaCapture({
   const { hasPermission: hasCamPermission, requestPermission: requestCamPermission } = useCameraPermission();
   const { hasPermission: hasMicPermission, requestPermission: requestMicPermission } = useMicrophonePermission();
   const cameraRef     = useRef<CameraRef>(null);
-  const photoOutput   = usePhotoOutput();
+  const photoOutput   = usePhotoOutput({ containerFormat: 'jpeg' });
   // targetBitRate is a hint to the encoder; maxFileSize in createRecorder is the real hard cap.
   const videoOutput   = useVideoOutput({ enableAudio: true, fileType: 'mp4', targetBitRate: 1_500_000 });
   const recorderRef   = useRef<Recorder | undefined>(undefined);
