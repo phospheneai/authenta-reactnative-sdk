@@ -1,6 +1,6 @@
 {
   "name": "@authenta/react-native",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Authenta React Native SDK — camera capture UI powered by @authenta/core",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,7 +27,7 @@
   "author": "Authenta",
   "license": "MIT",
   "dependencies": {
-    "@authenta/core": "^1.0.5",
+    "@authenta/core": "^1.0.6",
     "react-native-compressor": "^1.18.2",
     "react-native-image-picker": "^8.2.1",
     "react-native-nitro-image": "0.14.0",

@@ -351,7 +351,9 @@ export class AuthentaClient {
         faceSimilarityCheck = false,
       } = fiOptions;
       // Only send truthy flags — the API treats absent fields as false.
-      const params: Record<string, boolean> = {};
+      const params: Record<string, boolean | string> = {};
+      const version = "v1";
+      params.version = version;
       if (faceswapCheck) params.isFaceswapCheck = true;
       if (livenessCheck) params.isLivenessCheck = true;
       if (faceSimilarityCheck) params.isSimilarityCheck = true;
