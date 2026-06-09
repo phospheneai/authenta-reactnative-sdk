@@ -33,5 +33,22 @@ target 'AuthentaDemo' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+    # Fix fmt consteval incompatibility with Xcode 26 / Apple Clang.
+    # fmt's base.h redefines FMT_USE_CONSTEVAL internally via a plain #if/#elif chain
+    # (no #ifndef guard), so -DFMT_USE_CONSTEVAL=0 on the command line gets overridden.
+    # Instead, patch the header to treat ALL Apple Clang builds like pre-14 (no consteval).
+    base_h_path = installer.pods_project.path.dirname.to_s + '/fmt/include/fmt/base.h'
+    if File.exist?(base_h_path)
+      File.chmod(0644, base_h_path)
+      content = File.read(base_h_path)
+      old_str = "#elif defined(__apple_build_version__) && __apple_build_version__ < 14000029L\n#  define FMT_USE_CONSTEVAL 0  // consteval is broken in Apple clang < 14."
+      new_str = "#elif defined(__apple_build_version__)\n#  define FMT_USE_CONSTEVAL 0  // consteval is broken in Apple clang."
+      if content.include?(old_str)
+        File.write(base_h_path, content.sub(old_str, new_str))
+        Pod::UI.puts "Patched fmt/include/fmt/base.h: disabled consteval for all Apple Clang (Xcode 26 fix)"
+      else
+        Pod::UI.puts "fmt/include/fmt/base.h: patch already applied or not needed"
+      end
+    end
   end
 end
