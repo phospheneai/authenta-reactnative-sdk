@@ -35,7 +35,7 @@ import {AuthentaCapture} from "@authenta/react-native";
 
 const client = new AuthentaClient({
   baseUrl: 'https://platform.authenta.ai',
-  api_key: 'API_KEY_HERE', // Get this from your Authenta dashboard
+  api_key: '<API_KEY>', // Get this from your Authenta dashboard
   auth_enabled: true,
 });
 
