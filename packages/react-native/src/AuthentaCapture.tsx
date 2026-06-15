@@ -148,13 +148,22 @@ export function AuthentaCapture({
 
   // ── Camera ──────────────────────────────────────────────────────────────────
   const [cameraPosition, setCameraPosition] = useState<'front' | 'back'>('front');
+  // Incremented each time we enter the camera step to force a fresh AVCaptureSession.
+  // Without this, reusing the same Camera instance after an error on iOS causes a
+  // native crash because the old session is in an invalid state.
+  const [cameraSessionKey, setCameraSessionKey] = useState(0);
   const device = useCameraDevice(cameraPosition);
   const { hasPermission: hasCamPermission, requestPermission: requestCamPermission } = useCameraPermission();
   const { hasPermission: hasMicPermission, requestPermission: requestMicPermission } = useMicrophonePermission();
   const cameraRef     = useRef<CameraRef>(null);
   const photoOutput   = usePhotoOutput({ containerFormat: 'jpeg' });
-  // targetBitRate is a hint to the encoder; maxFileSize in createRecorder is the real hard cap.
-  const videoOutput   = useVideoOutput({ enableAudio: true, fileType: 'mp4', targetBitRate: 1_500_000 });
+  // Audio is only needed for video recording. Disabling it for photo-only capture prevents
+  // AVAudioSession conflicts with active phone calls (AVErrorFourCharCode='!pri').
+  const videoOutput   = useVideoOutput({
+    enableAudio: captureMode !== 'photo',
+    fileType: 'mp4',
+    targetBitRate: 1_500_000,
+  });
   const recorderRef   = useRef<Recorder | undefined>(undefined);
   const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isRecordingRef = useRef(false); // mirror of isRecording for async callbacks
@@ -260,6 +269,7 @@ export function AuthentaCapture({
     }
 
     setCaptureMode(mode);
+    setCameraSessionKey((k: number) => k + 1);
     setStep(similarity ? 'reference' : 'camera');
   }, [liveness, faceswap, similarity, hasCamPermission, requestCamPermission, hasMicPermission, requestMicPermission, handleError]);
 
@@ -298,6 +308,7 @@ export function AuthentaCapture({
 
   const handleReferenceNext = useCallback(() => {
     if (!referenceUri) return;
+    setCameraSessionKey((k: number) => k + 1);
     setStep('camera');
   }, [referenceUri]);
 
@@ -418,6 +429,7 @@ export function AuthentaCapture({
   const handleRetry = useCallback(() => {
     setLastError(undefined);
     setIsCameraReady(false);
+    setCameraSessionKey((k: number) => k + 1); // force fresh AVCaptureSession on iOS
     setStep('camera');
   }, []);
 
@@ -573,6 +585,7 @@ export function AuthentaCapture({
     return (
       <View style={s.cameraScreen}>
         <Camera
+          key={cameraSessionKey}
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           device={device}
@@ -580,7 +593,20 @@ export function AuthentaCapture({
           outputs={cameraOutputs}
           onStarted={() => setIsCameraReady(true)}
           onStopped={() => setIsCameraReady(false)}
-          onError={(err) => handleError(err instanceof Error ? err : new AuthentaError(String(err)))}
+          onError={(err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            // '!pri' = another app (phone call / video call) has audio or camera priority
+            // 'Another app is using the camera' covers FaceTime/Zoom taking exclusive camera access
+            const isCameraStolen =
+              msg.includes('Another app') || msg.includes('multiple foreground');
+            const isAudioConflict = msg.includes('!pri');
+            const friendly = isCameraStolen
+              ? 'The camera is in use by another app (e.g. FaceTime or Zoom). Please end that call and try again.'
+              : isAudioConflict
+                ? 'The camera was interrupted by a phone call. End the call and tap Try Again.'
+                : msg;
+            handleError(new AuthentaError(friendly));
+          }}
         />
 
         {/* Top overlay */}
