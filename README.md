@@ -71,6 +71,8 @@ const client = new AuthentaClient({
 ### `@authenta/react-native` — AuthentaCapture component
 
 ```tsx
+import { AuthentaCapture } from '@authenta/react-native';
+
 <AuthentaCapture
   client={client}
   modelType="FI-1"
@@ -79,12 +81,24 @@ const client = new AuthentaClient({
   faceswapCheck={false}
   faceSimilarityCheck={false}
   onClose={() => setCaptureOpen(false)}
-  onResult={(media) => console.log(media.result?.isSpoof)}
+  onResult={(media) => {
+    console.log(media.result?.isSpoof);
+    console.log(media.result?.isDeepFake);
+    console.log(media.result?.isSimilar);
+  }}
   onError={(err) => console.error(err.message)}
 />
 ```
 
 The component handles: camera permission requests, VisionCamera, photo/video capture, reference image picker, S3 upload, polling, result display, and up to 3 retry attempts — all without any code in your app beyond the props above.
+
+**Peer dependencies required:**
+
+```bash
+npm install react-native-vision-camera react-native-image-picker \
+  react-native-blob-util react-native-compressor \
+  react-native-nitro-modules react-native-nitro-image
+```
 
 ---
 
@@ -118,19 +132,16 @@ authenta-reactnative-sdk/
 │   │   │   ├── errors.ts            Typed error classes
 │   │   │   ├── types/index.ts       All TypeScript interfaces
 │   │   │   └── utils/helpers.ts     MIME type helpers
-│   │   ├── __tests__/               Integration tests (run against live API)
-│   │   │   ├── setup.ts             Shared client + file paths
-│   │   │   ├── df1.test.ts          DF-1 deepfake
-│   │   │   ├── ac1.test.ts          AC-1 AI-generated image
-│   │   │   ├── fi1-liveness.test.ts FI-1 liveness
-│   │   │   ├── fi1-faceswap.test.ts FI-1 faceswap
-│   │   │   ├── fi1-similarity.test.ts  FI-1 similarity
-│   │   │   ├── fi1-full.test.ts     FI-1 all checks combined
-│   │   │   ├── verify-helpers.test.ts  verify_* wrappers
-│   │   │   └── media-crud.test.ts   createMedia / getMedia / list / delete
-│   │   ├── tsconfig.json            Build config
-│   │   ├── tsconfig.test.json       Test config (adds jest + node types)
-│   │   └── jest.config.js
+│   │   └── __tests__/               Integration tests (run against live API)
+│   │       ├── setup.ts             Shared client + file paths
+│   │       ├── fi1-liveness.test.ts
+│   │       ├── fi1-faceswap.test.ts
+│   │       ├── fi1-similarity.test.ts
+│   │       ├── fi1-full.test.ts
+│   │       ├── df1.test.ts
+│   │       ├── ac1.test.ts
+│   │       ├── verify-helpers.test.ts
+│   │       └── media-crud.test.ts
 │   │
 │   └── react-native/                @authenta/react-native
 │       ├── src/

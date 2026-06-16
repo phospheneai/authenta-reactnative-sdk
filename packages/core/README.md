@@ -58,8 +58,8 @@ console.log(media.result?.isSpoof); // false = live person
 
 ```ts
 const client = new AuthentaClient({
-  api_key:      'YOUR_API_KEY',       // required
-  auth_enabled: true,                  // set true when api_key is provided
+  api_key:      'YOUR_API_KEY',              // required
+  auth_enabled: true,                         // set true when api_key is provided
   baseUrl:      'https://platform.authenta.ai', // optional — default shown
 });
 ```
@@ -149,6 +149,7 @@ console.log(meta.job.id); // use this id to poll later
 | `autoPolling` | `boolean` | `true` | Set `false` to return after upload without waiting for the result |
 | `interval` | `number` | `5000` | Polling interval in ms |
 | `timeout` | `number` | `600000` | Max total polling time in ms (10 min) |
+| `contentType` | `string` | — | Override MIME type sent with the upload (e.g. `'image/jpeg'`, `'video/mp4'`) |
 
 **Check compatibility — FI-1**
 
@@ -357,12 +358,12 @@ interface ProcessedMedia {
 
 // Detection result — fields depend on which checks were run
 interface DetectionResult {
-  isSpoof?:              boolean | string;
-  isDeepFake?:           boolean | string;
-  isSimilar?:            boolean | string;
-  similarityScore?:      number  | string;
-  faceVector?:           number[];
-  RealConfidencePercent?: number | string;
+  isSpoof?:               boolean | string;
+  isDeepFake?:            boolean | string;
+  isSimilar?:             boolean | string;
+  similarityScore?:       number  | string;
+  faceVector?:            number[];
+  RealConfidencePercent?: number  | string;
   [key: string]: any;
 }
 ```

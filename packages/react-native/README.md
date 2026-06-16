@@ -17,6 +17,7 @@ React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC plat
   - [Result Object](#result-object)
 - [Using AuthentaClient Directly](#using-authentaclient-directly)
 - [Error Handling](#error-handling)
+- [Platform Notes](#platform-notes)
 - [TypeScript Types](#typescript-types)
 
 ---
@@ -30,6 +31,9 @@ React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC plat
 | react-native-vision-camera | ≥ 5 |
 | react-native-image-picker | ≥ 7 |
 | react-native-blob-util | ≥ 0.19 |
+| react-native-compressor | ≥ 1.18 |
+| react-native-nitro-modules | ≥ 0.35 |
+| react-native-nitro-image | ≥ 0.14 |
 
 ---
 
@@ -39,7 +43,13 @@ React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC plat
 npm install @authenta/react-native
 ```
 
-This pulls in `@authenta/core`, `react-native-vision-camera`, `react-native-image-picker`, and `react-native-blob-util` automatically.
+Then install peer dependencies:
+
+```bash
+npm install react-native-vision-camera react-native-image-picker \
+  react-native-blob-util react-native-compressor \
+  react-native-nitro-modules react-native-nitro-image
+```
 
 After installation, link the native modules:
 
@@ -167,6 +177,8 @@ The SDK automatically selects the correct capture mode based on which checks are
 
 The user can flip between front and back camera at any time (except while recording).
 
+Video recording is capped at **10 seconds** and **7 MB**. If the file exceeds 6 MB it is automatically compressed before upload using `react-native-compressor`.
+
 ### Result Object
 
 `onResult` receives a `ProcessedMedia` object:
@@ -281,6 +293,35 @@ if (err instanceof AuthenticationError) {
 | `code` | `string?` | API error code (e.g. `IAM001`) |
 | `statusCode` | `number?` | HTTP status code |
 | `details` | `object?` | Raw API response body |
+
+### Camera Errors
+
+The SDK surfaces camera errors through `onError` with a human-readable message:
+
+| Situation | Error message |
+|---|---|
+| Active phone call (audio conflict) | `"The camera was interrupted by a phone call. End the call and tap Try Again."` |
+| Active video call (FaceTime / Zoom) | `"The camera is in use by another app. Please end that call and try again."` |
+| Camera not ready yet | `"Camera is still starting. Please try again in a moment."` |
+| Recording failed | `"Recording failed"` |
+
+The modal allows up to **3 retry attempts** before requiring the user to dismiss and restart.
+
+---
+
+## Platform Notes
+
+### iOS
+
+- Each detection attempt starts a **fresh native `AVCaptureSession`**. This prevents a crash that occurs on iOS when the same session is reused after an error or interruption — Android's Camera2 API does not have this restriction.
+- **Audio phone calls:** Photo capture works normally during an active audio call. Video recording is unavailable as iOS's audio session is held by the call.
+- **Video calls (FaceTime, Zoom, Teams):** iOS gives the active video call app exclusive camera access. Detection is not possible while a video call is in progress — the user must end the call first.
+- **Screen recording / screen mirroring:** Neither blocks the camera. Detection works normally.
+
+### Android
+
+- Camera and microphone permissions are requested at runtime on first use.
+- No known restrictions when used alongside audio calls.
 
 ---
 
