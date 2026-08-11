@@ -1,6 +1,13 @@
 # @authenta/react-native
 
-React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC platform. Wraps [`@authenta/core`](https://www.npmjs.com/package/@authenta/core) in a self-contained modal — your app only decides which checks to enable and receives the result.
+React Native UI for the [Authenta](https://authenta.ai) platform. Wraps [`@authenta/core`](https://www.npmjs.com/package/@authenta/core) in self-contained modals — your app decides what to run and receives the result.
+
+Two independent components:
+
+| Component | Service | What it does |
+|---|---|---|
+| `AuthentaCapture` | Authenta platform | Captures a photo or video and returns liveness / faceswap / similarity results |
+| `AuthentaFaceIndex` | Your FaceSim host | Enrols photos of a person, and searches a face against everything enrolled |
 
 ---
 
@@ -15,6 +22,11 @@ React Native camera capture UI for the [Authenta](https://authenta.ai) eKYC plat
   - [Props](#props)
   - [Check Modes & Capture Rules](#check-modes--capture-rules)
   - [Result Object](#result-object)
+- [AuthentaFaceIndex](#authentafaceindex)
+  - [Flow](#flow)
+  - [Props](#props-1)
+  - [Search image size](#search-image-size)
+- [Choosing between the two](#choosing-between-the-two)
 - [Using AuthentaClient Directly](#using-authentaclient-directly)
 - [Error Handling](#error-handling)
 - [Platform Notes](#platform-notes)
@@ -140,13 +152,17 @@ export default function App() {
 
 ## AuthentaCapture
 
-`AuthentaCapture` is a self-contained modal that handles the entire eKYC capture flow:
+`AuthentaCapture` is a self-contained modal that handles the entire capture flow:
 
-1. **Toggles** — user enables which checks to run (or pre-set via props)
+1. **Starting** — validates the checks you passed in and requests camera/microphone permission
 2. **Reference image** — user picks a face photo from their library (only when `faceSimilarityCheck` is enabled)
 3. **Camera** — live camera view with capture/record buttons and front/back flip
 4. **Processing** — upload → finalize → polling → result fetch, all handled internally
 5. **Result / Error** — shows the outcome; up to 3 retry attempts on failure
+
+Your app decides which checks to run and passes them as props — the modal never
+asks the user to pick them again. It opens straight into the camera (or the
+reference picker, when similarity is enabled).
 
 ### Props
 
@@ -158,9 +174,13 @@ export default function App() {
 | `onResult` | `(result: ProcessedMedia) => void` | Yes | — | Called with the job result on success |
 | `onError` | `(error: Error \| AuthentaError) => void` | No | — | Called on capture or API errors |
 | `modelType` | `ModelType` | No | `'FI-1'` | Model to run |
-| `livenessCheck` | `boolean` | No | `false` | Pre-enable liveness check |
-| `faceswapCheck` | `boolean` | No | `false` | Pre-enable faceswap check |
-| `faceSimilarityCheck` | `boolean` | No | `false` | Pre-enable face similarity check |
+| `livenessCheck` | `boolean` | No | `false` | Run the liveness check |
+| `faceswapCheck` | `boolean` | No | `false` | Run the faceswap check (video) |
+| `faceSimilarityCheck` | `boolean` | No | `false` | Run the face similarity check (photo + reference image) |
+
+At least one check must be enabled for `FI-1`, and `faceswapCheck` cannot be
+combined with `faceSimilarityCheck` — either mistake surfaces through `onError`
+as a `ValidationError` as soon as the modal opens.
 
 ### Check Modes & Capture Rules
 
@@ -203,6 +223,157 @@ Video recording is capped at **10 seconds** and **7 MB**. If the file exceeds 6 
   taskType:  TaskType;
 }
 ```
+
+---
+
+## AuthentaFaceIndex
+
+`AuthentaFaceIndex` is a separate modal for the **FaceSim** face-indexing
+server. It is unrelated to detection: different host, no API key, and a tenant
+UUID instead. Use it alongside `AuthentaCapture` or on its own.
+
+```tsx
+import { AuthentaFaceIndex, FaceIndexClient } from '@authenta/react-native';
+
+const faces = new FaceIndexClient({
+  baseUrl: 'http://192.168.1.10:8000',
+  tenantId: '6c60ef62-c848-40e3-9cb4-9472ff7b8b58',
+});
+
+<AuthentaFaceIndex
+  client={faces}
+  visible={open}
+  maxImages={3}
+  onClose={() => setOpen(false)}
+  onEnrolled={(result) => console.log(result.subject_id, result.processedCount)}
+  onSearchResult={(response) => console.log(response.results)}
+  onError={(err) => console.warn(err.message)}
+/>
+```
+
+### Flow
+
+Enrolling and searching are **two independent features**, both reachable from
+the modal's home page. Searching does not require enrolling first — it matches
+against every face already indexed for the tenant, including from earlier
+sessions.
+
+```
+                    ┌──────────────────────────┐
+                    │  Face Indexing (home)    │
+                    │  ─ pick up to N photos   │
+                    │  [Index N Photos]        │
+                    │  [Search a Face]         │
+                    └───────┬──────────┬───────┘
+                            │          │
+             ┌──────────────┘          └──────────────┐
+             ▼                                        ▼
+    Indexing (upload + poll)                  Camera or Library
+             ▼                                        ▼
+    ┌──────────────────┐                     Matching (downscale + search)
+    │ Faces Indexed    │                              ▼
+    │ per-photo status │                     ┌──────────────────┐
+    │ [Index More]     │                     │ Search Results   │
+    │ [Done]           │                     │ ranked matches   │
+    └──────────────────┘                     │ [Search Another] │
+                                             │ [Back]           │
+                                             └──────────────────┘
+```
+
+1. **Face Indexing** — pick up to `maxImages` photos from the library. HEIC is
+   converted to JPEG automatically, since the server takes only JPEG, PNG, and
+   WebP. Search is available here too.
+2. **Indexing** — uploads to S3 and polls until every embedding is stored.
+3. **Faces Indexed** — per-photo status, with any server error shown inline.
+4. **Search a Face** — take a photo with the camera or pick one from the
+   library. The image is downscaled before searching, because the API carries it
+   in a query string — see [Search image size](#search-image-size).
+5. **Search Results** — matches ranked by similarity, strongest first.
+
+The modal stays open after each step so the user can keep enrolling or
+searching. `onEnrolled` and `onSearchResult` hand the same data to your app, so
+you can render it in your own UI — close the modal from `onClose` when you would
+rather show results yourself.
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `client` | `FaceIndexClient` | Yes | — | Client from `@authenta/core` |
+| `visible` | `boolean` | Yes | — | Controls modal open/close |
+| `onClose` | `() => void` | Yes | — | Called when the user dismisses the modal |
+| `onEnrolled` | `(result: EnrollmentResult) => void` | No | — | Called when every face has settled |
+| `onSearchResult` | `(response: SearchResponse) => void` | No | — | Called after each search |
+| `onError` | `(error: Error) => void` | No | — | Called on validation, network, or API errors |
+| `maxImages` | `number` | No | `3` | How many photos may be indexed at once |
+
+> **Cleartext HTTP:** a FaceSim server on `http://` needs
+> `android:usesCleartextTraffic="true"` (or a network-security config) on
+> Android, and an `NSAppTransportSecurity` exception on iOS. `127.0.0.1` refers
+> to the device — use your machine's LAN IP when testing.
+
+Enrolling and searching both read from the photo library, so
+`NSPhotoLibraryUsageDescription` is required on iOS. Searching by camera also
+needs `NSCameraUsageDescription` — but never the microphone, since face indexing
+never records video.
+
+### Search image size
+
+`GET /v1/search` sends the photo inside the URL, so how large a photo may be
+depends on the server's request-line limit — a deployment detail your app has no
+way of knowing. An unmodified camera photo overflows a default nginx and comes
+back as `414 Request-URI Too Large`.
+
+**The modal handles this for you.** It sends the best quality first and steps
+down the ladder (800 → 512 → 384 → 288 → 224 → 160 px) only when the server
+actually answers `414`, keeping the largest size that host accepts. The rung it
+lands on is remembered, so the first search may cost a few quick attempts and
+every later one costs a single request. Nothing to configure — whatever the user
+captures or picks produces a result.
+
+If you already know your server's limit, set it and skip the discovery round
+trips entirely:
+
+```ts
+const faces = new FaceIndexClient({
+  baseUrl, tenantId,
+  maxSearchImageChars: 7000,   // matches nginx's default 8 KB request line
+});
+```
+
+Raising the server's limit is what actually improves match quality, because the
+ladder will then settle on a larger image:
+
+```nginx
+large_client_header_buffers 4 64k;   # nginx default is 4 8k
+```
+
+> On a default 8 KB server the ladder settles around 224 px. That is fine when
+> the face fills the frame, but a small or distant face may return "No face was
+> found" — the image is legal, the face is just too few pixels. Raising the
+> server limit (or moving `/v1/search` to a `POST` body) is the real fix.
+
+---
+
+## Choosing between the two
+
+The two components hit different servers and share no state. A face-indexing
+session runs **no detection model**, and a detection session indexes nothing.
+Present them as separate modes rather than running both at once:
+
+```tsx
+const [mode, setMode] = useState<'detect' | 'index' | null>(null);
+
+<AuthentaCapture   visible={mode === 'detect'} … />
+<AuthentaFaceIndex visible={mode === 'index'}  … />
+```
+
+Opening both at the same time stacks two modals and is never useful. If your UI
+has detection toggles alongside an indexing switch, clear and disable the
+toggles while indexing is selected — `AuthentaCapture` will otherwise open with
+no checks enabled and immediately report a `ValidationError`. See
+[examples/AuthentaDemo/App.tsx](../../examples/AuthentaDemo/App.tsx) for a
+worked example.
 
 ---
 
@@ -294,6 +465,24 @@ if (err instanceof AuthenticationError) {
 | `statusCode` | `number?` | HTTP status code |
 | `details` | `object?` | Raw API response body |
 
+### Face Indexing Errors
+
+`AuthentaFaceIndex` reports failures through `onError` as `FaceIndexError`,
+whose `message` is already safe to show a user (the raw server text is kept at
+`err.details.apiMessage`):
+
+| Situation | Error message |
+|---|---|
+| Tenant not permitted | `"This tenant is not allowed to use face indexing."` |
+| No face in the query photo | `"No face was found in that photo. Use a clear, front-facing photo and try again."` |
+| Unreadable / unsupported image | `"That image could not be read. Choose a JPEG, PNG, or WebP photo."` |
+| Search image too large for the URL | `"The search image is too large to send in the request URL…"` |
+| Storage failure | `"The face indexing storage is temporarily unavailable. Please try again."` |
+| Host unreachable / wrong IP | `"The face indexing server at … did not respond within 30000ms."` |
+
+The modal shows the same message on its error screen with a **Try Again** button
+that returns to the home page.
+
 ### Camera Errors
 
 The SDK surfaces camera errors through `onError` with a human-readable message:
@@ -327,10 +516,16 @@ The modal allows up to **3 retry attempts** before requiring the user to dismiss
 
 ## TypeScript Types
 
-All types are re-exported from `@authenta/core`:
+Both component prop types are exported, and every `@authenta/core` type is
+re-exported so a single import is enough:
 
 ```ts
 import type {
+  // Component props
+  AuthentaCaptureProps,
+  AuthentaFaceIndexProps,
+
+  // Detection — from @authenta/core
   AuthentaClientConfig,
   ModelType,
   MediaStatus,
@@ -342,7 +537,22 @@ import type {
   ProcessedMedia,
   Artifact,
   TaskType,
+
+  // Face indexing — from @authenta/core
+  FaceIndexClientConfig,
+  LocalFaceImage,
+  EnrollmentResult,
+  TenantFace,
+  SearchResponse,
+  SearchMatch,
+  FaceStatus,
 } from '@authenta/react-native';
+```
+
+The clients themselves come from the same place:
+
+```ts
+import { AuthentaClient, FaceIndexClient } from '@authenta/react-native';
 ```
 
 ---

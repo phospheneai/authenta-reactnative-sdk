@@ -1,238 +1,286 @@
 /**
- * Authenta Demo App
+ * Authenta Demo App — the ONLY file a client developer needs to write.
  *
- * This is the ONLY file a client developer needs to write.
+ * A. Detection (Authenta platform)
+ *    Configure AuthentaClient with your domain + key, toggle which checks to
+ *    run, and tap Start. AuthentaCapture opens the camera, captures a photo or
+ *    video (whichever the checks require), compresses and uploads it, polls,
+ *    and returns the finished ProcessedMedia.
  *
- * Steps:
- *  1. Create an AuthentaClient with your credentials.
- *  2. Toggle which checks you want to run.
- *  3. Tap "Start Detection" — AuthentaCapture opens the camera,
- *     captures the image/video, uploads it, polls for the result,
- *     and returns the finished ProcessedMedia object.
- *  4. Display whatever you want from the result.
+ * B. Face indexing (FaceSim server — separate host, tenant ID only)
+ *    Turn on "Image Indexing" and tap Start. AuthentaFaceIndex uploads photos,
+ *    waits for the embeddings, and searches a face from camera or library.
  *
- * The SDK handles: camera permission, VisionCamera, capture/record,
- * reference image picker, upload, S3, polling, retries, error UI.
+ * Either way the SDK handles permissions, capture, compression, upload, S3,
+ * polling, retries, and error UI. You just read the result.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
+  Image, SafeAreaView, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View,
 } from 'react-native';
 
-// ─── Import ONLY these two things from the SDK ──────────────────────────────
-import { AuthentaClient } from '@authenta/core';
-import type { ProcessedMedia } from '@authenta/core';
-import {AuthentaCapture} from "@authenta/react-native";
+import { AuthentaClient, FaceIndexClient } from '@authenta/core';
+import type { EnrollmentResult, ProcessedMedia, SearchResponse } from '@authenta/core';
+import { AuthentaCapture, AuthentaFaceIndex } from '@authenta/react-native';
 
-// ─── 1. Create the client once (typically in a context or singleton) ─────────
+// ─── 1. Detection client — your domain and API key ───────────────────────────
 
 const client = new AuthentaClient({
-  baseUrl: 'https://platform.authenta.ai',
-  api_key: '<API_KEY>', // Get this from your Authenta dashboard
+  baseUrl: '',
+  api_key: '',
   auth_enabled: true,
 });
 
-// ─── 2. Your screen ──────────────────────────────────────────────────────────
+// ─── 2. Face indexing server — your own host, no API key ─────────────────────
+// On a device, 127.0.0.1 is the phone itself: use your machine's LAN IP (and
+// allow cleartext traffic for that host on Android/iOS).
+
+const FACE_INDEX_BASE_URL  = '';
+const FACE_INDEX_TENANT_ID = '';
+
+const CHECKS = [
+  { key: 'liveness',   label: 'Liveness Check',        hint: 'Photo — is this a real live face?' },
+  { key: 'faceswap',   label: 'Faceswap Check',        hint: 'Video (10 s) — detect AI face-swap' },
+  { key: 'similarity', label: 'Face Similarity Check', hint: 'Photo — compare face to reference image' },
+] as const;
+
+type CheckKey = typeof CHECKS[number]['key'];
 
 export default function App() {
-  // Which checks to run — client app owns only this decision
-  const [livenessCheck, setLivenessCheck]         = useState(false);
-  const [faceswapCheck, setFaceswapCheck]         = useState(false);
-  const [faceSimilarityCheck, setFaceSimilarityCheck] = useState(false);
+  // The only input this app provides: which checks to run.
+  const [checks, setChecks] = useState<Record<CheckKey, boolean>>({
+    liveness: false, faceswap: false, similarity: false,
+  });
+  const [indexing, setIndexing] = useState(false);
 
-  // Modal visibility
-  const [captureOpen, setCaptureOpen] = useState(false);
+  const [openModal, setOpenModal] = useState<'capture' | 'index' | null>(null);
 
-  // Result / error from AuthentaCapture
-  const [result, setResult] = useState<ProcessedMedia | null>(null);
-  const [error, setError]   = useState<string | null>(null);
+  // Whatever the SDK hands back.
+  const [result, setResult]         = useState<ProcessedMedia | null>(null);
+  const [enrollment, setEnrollment] = useState<EnrollmentResult | null>(null);
+  const [matches, setMatches]       = useState<SearchResponse | null>(null);
+  const [error, setError]           = useState<string | null>(null);
 
-  const atLeastOneEnabled = livenessCheck || faceswapCheck || faceSimilarityCheck;
+  // The constructor validates the tenant UUID, so keep a bad config visible
+  // instead of crashing at startup.
+  const faceClient = useMemo(() => {
+    try {
+      return new FaceIndexClient({ baseUrl: FACE_INDEX_BASE_URL, tenantId: FACE_INDEX_TENANT_ID });
+    } catch {
+      return null;
+    }
+  }, []);
 
-  function handleResult(res: ProcessedMedia) {
-    // The SDK finished everything — just display what you need
-    setResult(res);
-    setError(null);
+  const anyCheck = Object.values(checks).some(Boolean);
+  const canStart = indexing ? !!faceClient : anyCheck;
+
+  const clear = () => { setResult(null); setEnrollment(null); setMatches(null); setError(null); };
+
+  // Face indexing is a different server and runs no detection model, so the two
+  // are mutually exclusive: turning it on clears every check.
+  function toggleIndexing(value: boolean) {
+    setIndexing(value);
+    if (value) setChecks({ liveness: false, faceswap: false, similarity: false });
+    clear();
   }
 
-  function handleError(err: Error) {
-    setError(err.message);
-    setResult(null);
+  function toggle(key: CheckKey, value: boolean) {
+    if (indexing) return; // no detection model may run while indexing is on
+    // faceswap and similarity conflict — enabling one clears the other.
+    setChecks(c => ({
+      ...c,
+      [key]: value,
+      ...(value && key === 'faceswap'   ? { similarity: false } : {}),
+      ...(value && key === 'similarity' ? { faceswap: false }   : {}),
+    }));
+    clear();
   }
 
   return (
     <SafeAreaView style={s.safe}>
       <ScrollView contentContainerStyle={s.scroll}>
-
-        {/* ── Header ─────────────────────────────────────────────── */}
         <Text style={s.heading}>Authenta Demo</Text>
-        <Text style={s.subheading}>
-          Toggle the checks you want, then tap Start.{'\n'}
-          The SDK opens the camera and returns the result.
+        <Text style={s.sub}>
+          Pick what you want, then tap Start. The SDK opens the camera and
+          returns the result.
         </Text>
 
-        {/* ── Toggles — the ONLY input the client app provides ──── */}
+        {/* Face indexing runs against a different server, so it is its own mode */}
         <View style={s.card}>
-          <Text style={s.cardTitle}>Detection Checks</Text>
-
-          <ToggleRow
-            label="Liveness Check"
-            hint="Photo — is this a real live face?"
-            value={livenessCheck}
-            onValueChange={(v) => {
-              setLivenessCheck(v);
-              setResult(null);
-            }}
-          />
-
-          <ToggleRow
-            label="Faceswap Check"
-            hint="Video (10 s) — detect AI face-swap"
-            value={faceswapCheck}
-            onValueChange={(v) => {
-              setFaceswapCheck(v);
-              // faceswap and faceSimilarity conflict — auto-clear
-              if (v) setFaceSimilarityCheck(false);
-              setResult(null);
-            }}
-          />
-
-          <ToggleRow
-            label="Face Similarity Check"
-            hint="Photo — compare face to reference image"
-            value={faceSimilarityCheck}
-            onValueChange={(v) => {
-              setFaceSimilarityCheck(v);
-              // similarity and faceswap conflict — auto-clear
-              if (v) setFaceswapCheck(false);
-              setResult(null);
-            }}
+          <Text style={s.cardTitle}>Face Indexing</Text>
+          <Toggle
+            label="Image Indexing"
+            hint="Upload photos to index a face, then search for it"
+            value={indexing}
+            onChange={toggleIndexing}
             last
           />
         </View>
 
-        {/* ── Active checks summary ────────────────────────────── */}
-        {atLeastOneEnabled && (
-          <View style={s.summaryBox}>
-            <Text style={s.summaryLabel}>Will run:</Text>
-            {livenessCheck      && <Text style={s.summaryItem}>• Liveness check (photo)</Text>}
-            {faceswapCheck      && <Text style={s.summaryItem}>• Faceswap check (video, 10 s)</Text>}
-            {faceSimilarityCheck && <Text style={s.summaryItem}>• Face similarity (photo + reference image)</Text>}
+        {indexing && !faceClient && (
+          <View style={s.errorCard}>
+            <Text style={s.errorTitle}>Face indexing not configured</Text>
+            <Text style={s.errorText}>
+              FACE_INDEX_TENANT_ID must be a valid UUID and FACE_INDEX_BASE_URL
+              must point at your FaceSim server.
+            </Text>
           </View>
         )}
 
-        {/* ── Start button ─────────────────────────────────────── */}
+        <View style={[s.card, indexing && s.muted]}>
+          <Text style={s.cardTitle}>
+            Detection Checks{indexing ? ' — unavailable while indexing' : ''}
+          </Text>
+          {CHECKS.map((check, i) => (
+            <Toggle
+              key={check.key}
+              label={check.label}
+              hint={check.hint}
+              value={checks[check.key]}
+              onChange={(v) => toggle(check.key, v)}
+              last={i === CHECKS.length - 1}
+              disabled={indexing}
+            />
+          ))}
+        </View>
+
         <TouchableOpacity
-          style={[s.startBtn, !atLeastOneEnabled && s.startBtnDisabled]}
-          onPress={() => {
-            setResult(null);
-            setError(null);
-            setCaptureOpen(true);
-          }}
-          disabled={!atLeastOneEnabled}
+          style={[s.start, !canStart && s.startOff]}
+          onPress={() => { clear(); setOpenModal(indexing ? 'index' : 'capture'); }}
+          disabled={!canStart}
         >
-          <Text style={s.startBtnText}>
-            {atLeastOneEnabled ? 'Start Detection' : 'Enable at least one check'}
+          <Text style={s.startText}>
+            {indexing ? 'Start Face Indexing'
+              : anyCheck ? 'Start Detection' : 'Enable at least one check'}
           </Text>
         </TouchableOpacity>
 
-        {/* ── Result display ────────────────────────────────────── */}
+        {/* ── Results — this is what your platform does with them ──────────── */}
         {result && (
-          <View style={s.resultCard}>
-            <Text style={s.resultTitle}>Result</Text>
-
-            <ResultRow label="Status"  value={result.status} />
-            <ResultRow label="Task"    value={result.taskTypeId} />
-            <ResultRow label="Job ID"  value={result.id} />
-
-            {result.result && (
-              <>
-                <View style={s.divider} />
-                <ResultRow label="Is Spoof"         value={result.result.isSpoof} />
-                <ResultRow label="Is Deepfake"      value={result.result.isDeepFake} />
-                <ResultRow label="Is Similar"       value={result.result.isSimilar} />
-                <ResultRow label="Similarity Score" value={result.result.similarityScore} />
-              </>
-            )}
-          </View>
+          <Card title="Detection Result">
+            <Line label="Status" value={result.status} />
+            <Line label="Task"   value={result.taskTypeId} />
+            <Line label="Job ID" value={result.id} />
+            {result.result && <>
+              <View style={s.divider} />
+              <Line label="Is Spoof"         value={result.result.isSpoof} />
+              <Line label="Is Deepfake"      value={result.result.isDeepFake} />
+              <Line label="Is Similar"       value={result.result.isSimilar} />
+              <Line label="Similarity Score" value={result.result.similarityScore} />
+            </>}
+          </Card>
         )}
 
-        {/* ── Error display ─────────────────────────────────────── */}
+        {enrollment && (
+          <Card title="Indexed Faces">
+            <Line label="Subject ID" value={enrollment.subject_id} />
+            <Line label="Indexed"    value={`${enrollment.processedCount} of ${enrollment.faces.length}`} />
+            <View style={s.divider} />
+            {enrollment.faces.map(face => (
+              <Line key={face.face_id} label={face.name} value={face.error ?? face.status} />
+            ))}
+          </Card>
+        )}
+
+        {matches && (
+          <Card title={`Search Matches (${matches.count})`}>
+            {matches.count === 0
+              ? <Text style={s.empty}>No indexed face matched that photo.</Text>
+              : matches.results.map(match => (
+                  <View key={match.face_id} style={s.match}>
+                    <Image source={{ uri: match.image_url }} style={s.matchThumb} />
+                    <View style={s.matchText}>
+                      <Text style={s.matchName} numberOfLines={1}>#{match.rank} · {match.name}</Text>
+                      <Text style={s.matchSub} numberOfLines={1}>Subject {match.subject_id.slice(0, 8)}…</Text>
+                    </View>
+                    <Text style={s.matchScore}>{(match.similarity_score * 100).toFixed(1)}%</Text>
+                  </View>
+                ))}
+          </Card>
+        )}
+
         {error && (
           <View style={s.errorCard}>
             <Text style={s.errorTitle}>Error</Text>
             <Text style={s.errorText}>{error}</Text>
           </View>
         )}
-
       </ScrollView>
 
-      {/* ── 3. AuthentaCapture — client app passes checks, SDK does the rest ─ */}
+      {/* ── 3. The SDK modals ─────────────────────────────────────────────── */}
       <AuthentaCapture
         client={client}
         modelType="FI-1"
-        visible={captureOpen}
-        onClose={() => setCaptureOpen(false)}
-        livenessCheck={livenessCheck}
-        faceswapCheck={faceswapCheck}
-        faceSimilarityCheck={faceSimilarityCheck}
-        onResult={(res) => {
-          setCaptureOpen(false);
-          handleResult(res);
-        }}
-        onError={(err) => {
-          setCaptureOpen(false);
-          handleError(err);
-        }}
+        visible={openModal === 'capture'}
+        livenessCheck={checks.liveness}
+        faceswapCheck={checks.faceswap}
+        faceSimilarityCheck={checks.similarity}
+        onClose={() => setOpenModal(null)}
+        onResult={(res) => { setOpenModal(null); setResult(res); setError(null); }}
+        onError={(err) => { setOpenModal(null); setError(err.message); }}
       />
+
+      {faceClient && (
+        <AuthentaFaceIndex
+          client={faceClient}
+          visible={openModal === 'index'}
+          maxImages={3}
+          onClose={() => setOpenModal(null)}
+          // The modal stays open so the user can keep searching — these just
+          // mirror the data into this screen.
+          onEnrolled={(res) => { setEnrollment(res); setError(null); }}
+          onSearchResult={(res) => { setMatches(res); setError(null); }}
+          onError={(err) => setError(err.message)}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
-// ─── Small shared components ──────────────────────────────────────────────────
+// ─── Small shared pieces ──────────────────────────────────────────────────────
 
-function ToggleRow({
-  label, hint, value, onValueChange, last = false,
-}: {
-  label: string;
-  hint: string;
-  value: boolean;
-  onValueChange: (v: boolean) => void;
-  last?: boolean;
+function Toggle({ label, hint, value, onChange, last = false, disabled = false }: {
+  label: string; hint: string; value: boolean;
+  onChange: (v: boolean) => void; last?: boolean; disabled?: boolean;
 }) {
   return (
     <TouchableOpacity
-      style={[s.toggleRow, !last && s.toggleRowBorder]}
-      onPress={() => onValueChange(!value)}
+      style={[s.row, !last && s.rowBorder]}
+      onPress={() => onChange(!value)}
       activeOpacity={0.7}
+      disabled={disabled}
     >
-      <View style={s.toggleTextBlock}>
-        <Text style={s.toggleLabel}>{label}</Text>
-        <Text style={s.toggleHint}>{hint}</Text>
+      <View style={s.rowText}>
+        <Text style={s.rowLabel}>{label}</Text>
+        <Text style={s.rowHint}>{hint}</Text>
       </View>
       <Switch
         value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: '#d1d5db', true: '#6366f1' }}
-        thumbColor="#ffffff"
+        onValueChange={onChange}
+        disabled={disabled}
+        trackColor={{ false: '#d1d5db', true: ACCENT }}
+        thumbColor="#fff"
       />
     </TouchableOpacity>
   );
 }
 
-function ResultRow({ label, value }: { label: string; value: any }) {
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={[s.card, s.cardPad]}>
+      <Text style={s.resultTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function Line({ label, value }: { label: string; value: any }) {
   if (value === undefined || value === null) return null;
   return (
-    <View style={s.resultRow}>
-      <Text style={s.resultRowLabel}>{label}</Text>
-      <Text style={s.resultRowValue}>{String(value)}</Text>
+    <View style={s.line}>
+      <Text style={s.lineLabel} numberOfLines={1}>{label}</Text>
+      <Text style={s.lineValue}>{String(value)}</Text>
     </View>
   );
 }
@@ -245,91 +293,50 @@ const s = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: '#f9fafb' },
   scroll: { padding: 20, paddingBottom: 60 },
 
-  heading:    { fontSize: 26, fontWeight: '800', color: '#111827', marginBottom: 6 },
-  subheading: { fontSize: 14, color: '#6b7280', lineHeight: 21, marginBottom: 24 },
+  heading: { fontSize: 26, fontWeight: '800', color: '#111827', marginBottom: 6 },
+  sub:     { fontSize: 14, color: '#6b7280', lineHeight: 21, marginBottom: 24 },
 
-  // Card / toggles
   card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    marginBottom: 16,
-    overflow: 'hidden',
+    backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#e5e7eb',
+    marginBottom: 16, overflow: 'hidden',
   },
+  cardPad: { padding: 16 },
+  muted:   { opacity: 0.45 },
   cardTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#9ca3af',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 4,
+    fontSize: 12, fontWeight: '700', color: '#9ca3af', letterSpacing: 0.8,
+    textTransform: 'uppercase', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4,
   },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  toggleRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f3f4f6',
-  },
-  toggleTextBlock: { flex: 1, marginRight: 12 },
-  toggleLabel:     { fontSize: 15, fontWeight: '600', color: '#111827' },
-  toggleHint:      { fontSize: 12, color: '#9ca3af', marginTop: 2 },
 
-  // Summary
-  summaryBox: {
-    backgroundColor: '#eff6ff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-  },
-  summaryLabel: { fontSize: 12, fontWeight: '700', color: '#3730a3', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
-  summaryItem:  { fontSize: 13, color: '#1e40af', lineHeight: 22 },
+  row:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
+  rowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f3f4f6' },
+  rowText:   { flex: 1, marginRight: 12 },
+  rowLabel:  { fontSize: 15, fontWeight: '600', color: '#111827' },
+  rowHint:   { fontSize: 12, color: '#9ca3af', marginTop: 2 },
 
-  // Start button
-  startBtn: {
-    backgroundColor: ACCENT,
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: 'center',
-    marginBottom: 24,
-    shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+  start: {
+    backgroundColor: ACCENT, borderRadius: 16, paddingVertical: 18,
+    alignItems: 'center', marginBottom: 24,
   },
-  startBtnDisabled: {
-    backgroundColor: '#d1d5db',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  startBtnText: { color: '#ffffff', fontSize: 17, fontWeight: '700' },
+  startOff:  { backgroundColor: '#d1d5db' },
+  startText: { color: '#fff', fontSize: 17, fontWeight: '700' },
 
-  // Result card
-  resultCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    padding: 16,
-    marginBottom: 16,
-  },
   resultTitle: {
     fontSize: 12, fontWeight: '700', color: '#059669',
     textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12,
   },
-  resultRow:      { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
-  resultRowLabel: { fontSize: 13, color: '#6b7280' },
-  resultRowValue: { fontSize: 13, fontWeight: '600', color: '#111827', flexShrink: 1, textAlign: 'right' },
-  divider:        { height: StyleSheet.hairlineWidth, backgroundColor: '#f3f4f6', marginVertical: 8 },
+  line:      { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, gap: 12 },
+  lineLabel: { fontSize: 13, color: '#6b7280', flexShrink: 1 },
+  lineValue: { fontSize: 13, fontWeight: '600', color: '#111827', flexShrink: 1, textAlign: 'right' },
+  divider:   { height: StyleSheet.hairlineWidth, backgroundColor: '#f3f4f6', marginVertical: 8 },
+  empty:     { fontSize: 13, color: '#6b7280', lineHeight: 20 },
 
-  // Error card
+  match:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
+  matchThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: '#e5e7eb' },
+  matchText:  { flex: 1 },
+  matchName:  { fontSize: 14, fontWeight: '600', color: '#111827' },
+  matchSub:   { fontSize: 12, color: '#9ca3af', marginTop: 2 },
+  matchScore: { fontSize: 15, fontWeight: '700', color: ACCENT },
+
   errorCard:  { backgroundColor: '#fef2f2', borderRadius: 12, padding: 14, marginBottom: 16 },
   errorTitle: { fontSize: 12, fontWeight: '700', color: '#b91c1c', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 },
   errorText:  { fontSize: 13, color: '#b91c1c', lineHeight: 20 },

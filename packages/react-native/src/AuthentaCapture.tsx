@@ -1,400 +1,33 @@
 /**
- * AuthentaCapture — self-contained modal UI for eKYC face capture.
+ * AuthentaCapture — modal that captures media and returns a detection result.
  *
- * Uses react-native-vision-camera for live camera access, then passes the
- * captured URI straight to AuthentaClient.uploadAndPoll() and returns a ProcessedMedia
- * result via the onResult callback.
+ * The host app configures AuthentaClient and picks the checks, so this modal
+ * asks the user nothing: on open it validates the request, takes the
+ * permissions the resolved capture mode needs, opens the camera, then uploads
+ * through AuthentaClient.uploadAndPoll() and hands back the ProcessedMedia.
+ *
+ * Flow: busy → [reference] → camera → busy → result | error
  *
  * Peer dependencies required in the host app:
  *   react-native-vision-camera >= 5
  *   react-native-image-picker  >= 7  (for the reference image picker)
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import {
-  Camera,
-  useCameraDevice,
-  useCameraPermission,
-  useMicrophonePermission,
-  usePhotoOutput,
-  useVideoOutput,
-} from 'react-native-vision-camera';
-import type { CameraOutput, Recorder } from 'react-native-vision-camera';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Image, View } from 'react-native';
+import { useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera';
 import { launchImageLibrary } from 'react-native-image-picker';
 
-import { Video } from 'react-native-compressor';
+import { AuthentaError, ValidationError } from '@authenta/core';
+import type { ProcessedMedia } from '@authenta/core';
 
-import { AuthentaClient, AuthentaError, ValidationError } from '@authenta/core';
-import type { ModelType, ProcessedMedia } from '@authenta/core';
+import { CameraScreen } from './CameraScreen';
+import { resolveCaptureMode } from './media';
+import { s } from './theme';
+import type { AuthentaCaptureProps, CameraPosition, CaptureMode, CaptureStep } from './types';
+import { Button, ErrorView, KeyValue, Outcome, Page, Sheet, Spinner, useModalFlow } from './ui';
 
-// ─── Public types ─────────────────────────────────────────────────────────────
-
-export interface AuthentaCaptureProps {
-  /** Initialized AuthentaClient instance. */
-  client: AuthentaClient;
-  /** Model type to run against. Defaults to 'FI-1'. */
-  modelType?: ModelType;
-  /** Controls modal visibility. */
-  visible: boolean;
-  /** Called when the user dismisses the modal. */
-  onClose: () => void;
-  /** Called with the fully-processed result when detection completes. */
-  onResult: (result: ProcessedMedia) => void;
-  /** Called on API or capture errors. */
-  onError?: (error: Error | AuthentaError) => void;
-  /** Pre-enable the liveness check toggle. */
-  livenessCheck?: boolean;
-  /** Pre-enable the faceswap check toggle (video mode). */
-  faceswapCheck?: boolean;
-  /** Pre-enable the face similarity check toggle (photo mode + reference image). */
-  faceSimilarityCheck?: boolean;
-}
-
-// ─── Internal types ───────────────────────────────────────────────────────────
-
-type Step = 'toggles' | 'reference' | 'camera' | 'processing' | 'result' | 'error';
-type CaptureMode = 'photo' | 'video' | 'both';
-
-const MAX_RETRIES = 3;
-const VIDEO_MAX_DURATION_MS = 10_000;
-const VIDEO_SIZE_LIMIT_BYTES = 6 * 1024 * 1024; // 6 MB
-
-async function compressVideoIfNeeded(fileUri: string): Promise<string> {
-  try {
-    const rawPath = fileUri.replace(/^file:\/\//, '');
-    const blobUtil: any = (() => { try { const m = require('react-native-blob-util'); return m?.default ?? m; } catch { return null; } })();
-    if (blobUtil) {
-      const stat = await blobUtil.fs.stat(rawPath);
-      if (Number(stat.size) <= VIDEO_SIZE_LIMIT_BYTES) return fileUri;
-    }
-    return await Video.compress(fileUri, { compressionMethod: 'auto', minimumFileSizeForCompress: 0 });
-  } catch {
-    return fileUri;
-  }
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function resolveCaptureMode(
-  livenessCheck: boolean,
-  faceswapCheck: boolean,
-  faceSimilarityCheck: boolean,
-): CaptureMode {
-  if (faceswapCheck) return 'video';
-  if (faceSimilarityCheck) return 'photo';
-  if (livenessCheck) return 'both';
-  return 'photo';
-}
-
-function asFileUri(path: string): string {
-  const trimmed = path.trim();
-  const uri = trimmed.startsWith('file://') ? trimmed : `file://${trimmed}`;
-  console.log('[AuthentaCapture] asFileUri raw path:', JSON.stringify(path), '-> uri:', JSON.stringify(uri));
-  return uri;
-}
-
-// ─── CameraScreen ─────────────────────────────────────────────────────────────
-// Isolated sub-component that owns photoOutput + videoOutput hooks.
-// Keyed by cameraSessionKey in the parent so these hooks — and their underlying
-// native AVCaptureOutput objects — are fully destroyed and recreated for every
-// new camera session. On iOS, AVFoundation forbids an output from being attached
-// to more than one AVCaptureSession; sharing outputs across sessions (which happens
-// when the hooks live at the parent level) causes an unhandled NSException crash
-// on the second use. Android's Camera2 API has no such restriction.
-
-interface CameraScreenProps {
-  captureMode: CaptureMode;
-  cameraPosition: 'front' | 'back';
-  retryCount: number;
-  onCaptured: (uri: string) => void;
-  onError: (err: Error | AuthentaError) => void;
-  onBack: () => void;
-  onSwitchCamera: () => void;
-}
-
-function CameraScreen({
-  captureMode,
-  cameraPosition,
-  retryCount,
-  onCaptured,
-  onError,
-  onBack,
-  onSwitchCamera,
-}: CameraScreenProps) {
-  const device = useCameraDevice(cameraPosition);
-
-  // These hooks create native AVCaptureOutput objects. By living inside this
-  // keyed component they are recreated fresh for every new session.
-  const photoOutput = usePhotoOutput({ containerFormat: 'jpeg' });
-  const videoOutput = useVideoOutput({
-    enableAudio: captureMode !== 'photo',
-    fileType: 'mp4',
-    targetBitRate: 1_500_000,
-  });
-
-  const [isCameraReady, setIsCameraReady] = useState(false);
-  const [isRecording, setIsRecording]     = useState(false);
-
-  const recorderRef         = useRef<Recorder | undefined>(undefined);
-  const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const isRecordingRef      = useRef(false);
-  const isMountedRef        = useRef(true);
-
-  const cameraOutputs = useMemo<CameraOutput[]>(() => {
-    const outputs: CameraOutput[] = [];
-    if (captureMode === 'photo' || captureMode === 'both') outputs.push(photoOutput);
-    if (captureMode === 'video' || captureMode === 'both') outputs.push(videoOutput);
-    return outputs;
-  }, [captureMode, photoOutput, videoOutput]);
-
-  // Cleanup on unmount — stops any in-progress recording and clears timers.
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      if (recordingTimeoutRef.current) {
-        clearTimeout(recordingTimeoutRef.current);
-        recordingTimeoutRef.current = undefined;
-      }
-      const recorder = recorderRef.current;
-      if (recorder && isRecordingRef.current) {
-        isRecordingRef.current = false;
-        recorder.stopRecording().catch(() => {});
-      }
-      recorderRef.current = undefined;
-    };
-  }, []);
-
-  const clearRecordingState = useCallback(() => {
-    if (recordingTimeoutRef.current) {
-      clearTimeout(recordingTimeoutRef.current);
-      recordingTimeoutRef.current = undefined;
-    }
-    recorderRef.current = undefined;
-    isRecordingRef.current = false;
-    setIsRecording(false);
-  }, []);
-
-  const handleStopRecording = useCallback(async () => {
-    if (!isRecordingRef.current) return;
-    if (recordingTimeoutRef.current) {
-      clearTimeout(recordingTimeoutRef.current);
-      recordingTimeoutRef.current = undefined;
-    }
-    const recorder = recorderRef.current;
-    isRecordingRef.current = false;
-    setIsRecording(false);
-    if (!recorder) return;
-    try {
-      await recorder.stopRecording();
-    } catch (err) {
-      recorderRef.current = undefined;
-      onError(err instanceof Error ? err : new AuthentaError(String(err)));
-    }
-  }, [onError]);
-
-  const handleTakePhoto = useCallback(async () => {
-    if (!isCameraReady) {
-      onError(new AuthentaError('Camera is still starting. Please try again in a moment.'));
-      return;
-    }
-    try {
-      const photo = await photoOutput.capturePhotoToFile(
-        { flashMode: 'off', enableShutterSound: true },
-        {},
-      );
-      onCaptured(asFileUri(photo.filePath));
-    } catch (err) {
-      onError(err instanceof Error ? err : new AuthentaError(String(err)));
-    }
-  }, [isCameraReady, photoOutput, onCaptured, onError]);
-
-  const handleStartRecording = useCallback(async () => {
-    if (isRecordingRef.current) return;
-    if (!isCameraReady) {
-      onError(new AuthentaError('Camera is still starting. Please try again in a moment.'));
-      return;
-    }
-    try {
-      const recorder = await videoOutput.createRecorder({
-        maxDuration: VIDEO_MAX_DURATION_MS / 1000,
-        maxFileSize: 7 * 1024 * 1024,
-      });
-      recorderRef.current = recorder;
-
-      await recorder.startRecording(
-        async (filePath) => {
-          clearRecordingState();
-          if (!isMountedRef.current) return; // component unmounted; discard result
-          const videoUri = await compressVideoIfNeeded(asFileUri(filePath));
-          if (isMountedRef.current) onCaptured(videoUri);
-        },
-        (err) => {
-          clearRecordingState();
-          if (isMountedRef.current) {
-            onError(new AuthentaError(err.message ?? 'Recording failed'));
-          }
-        },
-      );
-
-      isRecordingRef.current = true;
-      setIsRecording(true);
-      recordingTimeoutRef.current = setTimeout(() => {
-        void handleStopRecording();
-      }, VIDEO_MAX_DURATION_MS + 250);
-    } catch (err) {
-      clearRecordingState();
-      onError(err instanceof Error ? err : new AuthentaError(String(err)));
-    }
-  }, [isCameraReady, videoOutput, onCaptured, onError, handleStopRecording, clearRecordingState]);
-
-  // Stop recording then navigate back.
-  const handleBack = useCallback(async () => {
-    await handleStopRecording();
-    onBack();
-  }, [handleStopRecording, onBack]);
-
-  if (!device) {
-    return (
-      <View style={s.centeredContent}>
-        <Text style={s.errorText}>
-          No {cameraPosition} camera available on this device.
-        </Text>
-        <TouchableOpacity style={s.secondaryBtn} onPress={onSwitchCamera}>
-          <Text style={s.secondaryBtnText}>Switch Camera</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  return (
-    <View style={s.cameraScreen}>
-      <Camera
-        style={StyleSheet.absoluteFill}
-        device={device}
-        isActive
-        outputs={cameraOutputs}
-        onStarted={() => setIsCameraReady(true)}
-        onStopped={() => setIsCameraReady(false)}
-        onError={(err) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          const isCameraStolen =
-            msg.includes('Another app') || msg.includes('multiple foreground');
-          const isAudioConflict = msg.includes('!pri');
-          const friendly = isCameraStolen
-            ? 'The camera is in use by another app (e.g. FaceTime or Zoom). Please end that call and try again.'
-            : isAudioConflict
-              ? 'The camera was interrupted by a phone call. End the call and tap Try Again.'
-              : msg;
-          onError(new AuthentaError(friendly));
-        }}
-      />
-
-      {/* Top overlay */}
-      <SafeAreaView style={s.cameraTopOverlay}>
-        <TouchableOpacity
-          onPress={() => void handleBack()}
-          style={[s.cameraBackBtn, isRecording && s.cameraFlipBtnDisabled]}
-          hitSlop={HIT_SLOP}
-          disabled={isRecording}
-        >
-          <Text style={s.cameraBackBtnText}>← Back</Text>
-        </TouchableOpacity>
-        <View style={s.cameraModeBadge}>
-          <Text style={s.cameraModeBadgeText}>
-            {captureMode === 'video' ? '🎥 Video (max 10 s)'
-              : captureMode === 'both' ? '📷 Photo  /  🎥 Video'
-              : '📷 Photo'}
-          </Text>
-        </View>
-        <TouchableOpacity
-          onPress={onSwitchCamera}
-          style={[s.cameraFlipBtn, isRecording && s.cameraFlipBtnDisabled]}
-          hitSlop={HIT_SLOP}
-          disabled={isRecording}
-        >
-          <Text style={s.cameraFlipBtnText}>⟳</Text>
-          <Text style={s.cameraFlipBtnLabel}>
-            {cameraPosition === 'front' ? 'Rear' : 'Selfie'}
-          </Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-
-      {/* Bottom overlay */}
-      <View style={s.cameraBottomOverlay}>
-        <Text style={s.cameraHint}>
-          {isRecording
-            ? 'Recording… tap ■ to stop'
-            : !isCameraReady
-              ? 'Camera is starting…'
-            : captureMode === 'video'
-              ? 'Position your face and tap ● to record'
-              : captureMode === 'both'
-                ? 'Take a photo  or  record a video'
-                : 'Position your face and tap ● to capture'}
-        </Text>
-
-        <View style={s.cameraControls}>
-          {(captureMode === 'photo' || captureMode === 'both') && !isRecording && (
-            <View style={s.captureBtnWrapper}>
-              <TouchableOpacity
-                style={[s.captureBtn, !isCameraReady && s.captureBtnDisabled]}
-                onPress={handleTakePhoto}
-                disabled={!isCameraReady}
-              >
-                <View style={s.captureBtnDot} />
-              </TouchableOpacity>
-              {captureMode === 'both' && (
-                <Text style={s.captureBtnLabel}>Photo</Text>
-              )}
-            </View>
-          )}
-
-          {(captureMode === 'video' || captureMode === 'both') && !isRecording && (
-            <View style={s.captureBtnWrapper}>
-              <TouchableOpacity
-                style={[s.captureBtn, s.recordBtn, !isCameraReady && s.captureBtnDisabled]}
-                onPress={handleStartRecording}
-                disabled={!isCameraReady}
-              >
-                <View style={[s.captureBtnDot, s.recordBtnDot]} />
-              </TouchableOpacity>
-              {captureMode === 'both' && (
-                <Text style={s.captureBtnLabel}>Video</Text>
-              )}
-            </View>
-          )}
-
-          {(captureMode === 'video' || captureMode === 'both') && isRecording && (
-            <TouchableOpacity style={[s.captureBtn, s.stopBtn]} onPress={handleStopRecording}>
-              <View style={s.stopBtnSquare} />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {retryCount > 0 && (
-          <Text style={s.cameraAttempts}>
-            Attempt {retryCount + 1} of {MAX_RETRIES}
-          </Text>
-        )}
-      </View>
-    </View>
-  );
-}
-
-// ─── AuthentaCapture ──────────────────────────────────────────────────────────
+export type { AuthentaCaptureProps } from './types';
 
 export function AuthentaCapture({
   client,
@@ -403,641 +36,172 @@ export function AuthentaCapture({
   onClose,
   onResult,
   onError,
-  livenessCheck: initLiveness = false,
-  faceswapCheck: initFaceswap = false,
-  faceSimilarityCheck: initSimilarity = false,
+  livenessCheck = false,
+  faceswapCheck = false,
+  faceSimilarityCheck = false,
 }: AuthentaCaptureProps) {
-
-  // ── Toggle state ────────────────────────────────────────────────────────────
-  const [liveness, setLiveness]     = useState(initLiveness);
-  const [faceswap, setFaceswap]     = useState(initFaceswap);
-  const [similarity, setSimilarity] = useState(initSimilarity);
-
-  // ── Flow state ──────────────────────────────────────────────────────────────
-  const [step, setStep]                 = useState<Step>('toggles');
-  const [captureMode, setCaptureMode]   = useState<CaptureMode>('photo');
+  const [mode, setMode]                 = useState<CaptureMode>('photo');
   const [referenceUri, setReferenceUri] = useState<string | undefined>();
-  const [lastResult, setLastResult]     = useState<ProcessedMedia | undefined>();
-  const [lastError, setLastError]       = useState<Error | AuthentaError | undefined>();
-  const retryCount                      = useRef(0);
+  const [result, setResult]             = useState<ProcessedMedia | undefined>();
+  const [facing, setFacing]             = useState<CameraPosition>('front');
+  // Bumped on every camera entry to force fresh native outputs on iOS.
+  const [session, setSession]           = useState(0);
 
-  // ── Camera ──────────────────────────────────────────────────────────────────
-  const [cameraPosition, setCameraPosition] = useState<'front' | 'back'>('front');
-  // Incremented each time we enter the camera step to force a fresh CameraScreen
-  // (and therefore fresh AVCaptureOutput objects) on iOS.
-  const [cameraSessionKey, setCameraSessionKey] = useState(0);
-  const { hasPermission: hasCamPermission, requestPermission: requestCamPermission } = useCameraPermission();
-  const { hasPermission: hasMicPermission, requestPermission: requestMicPermission } = useMicrophonePermission();
+  const camera = useCameraPermission();
+  const mic    = useMicrophonePermission();
 
-  // ── Reset modal to initial state ────────────────────────────────────────────
-  const reset = useCallback(() => {
-    setLiveness(initLiveness);
-    setFaceswap(initFaceswap);
-    setSimilarity(initSimilarity);
-    setStep('toggles');
-    setCameraPosition('front');
-    setReferenceUri(undefined);
-    setLastResult(undefined);
-    setLastError(undefined);
-    retryCount.current = 0;
-  }, [initLiveness, initFaceswap, initSimilarity]);
+  // Only FI-1 exposes the per-check options; other models run a plain photo capture.
+  const isFI = modelType.toUpperCase() === 'FI-1';
+  const needsReference = isFI && faceSimilarityCheck;
 
-  // Reset every time the modal opens
+  const flow = useModalFlow<CaptureStep>({
+    visible,
+    initial: 'busy',
+    onClose,
+    onError,
+    clear: () => {
+      setMode('photo');
+      setFacing('front');
+      setReferenceUri(undefined);
+      setResult(undefined);
+    },
+  });
+  const { setStep, fail, close, run, isOpen, attempts } = flow;
+
+  const toCamera = useCallback(() => {
+    setSession(k => k + 1);
+    setStep('camera');
+  }, [setStep]);
+
+  // ── Open: validate the requested checks, then take the permissions they need ─
   useEffect(() => {
-    if (visible) reset();
-  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Error handler ────────────────────────────────────────────────────────────
-  const handleError = useCallback((err: Error | AuthentaError) => {
-    retryCount.current += 1;
-    setLastError(err);
-    setStep('error');
-    onError?.(err);
-  }, [onError]);
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP: toggles
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  const handleContinue = useCallback(async () => {
-    if (!liveness && !faceswap && !similarity) {
-      handleError(new ValidationError('Please enable at least one check.'));
-      return;
-    }
-
-    if (faceswap && similarity) {
-      handleError(
-        new ValidationError(
-          'faceswapCheck and faceSimilarityCheck cannot be enabled together — ' +
-          'faceswap requires video while similarity requires a photo.',
-        ),
-      );
-      return;
-    }
-
-    if (!hasCamPermission) {
-      const granted = await requestCamPermission();
-      if (!granted) {
-        handleError(new AuthentaError('Camera permission is required.'));
-        return;
-      }
-    }
-
-    const mode = resolveCaptureMode(liveness, faceswap, similarity);
-
-    if (mode === 'video' || mode === 'both') {
-      if (!hasMicPermission) {
-        const granted = await requestMicPermission();
-        if (!granted) {
-          handleError(new AuthentaError('Microphone permission is required for video recording.'));
-          return;
+    if (!visible) return;
+    void run('Preparing camera…', async () => {
+      if (isFI) {
+        if (!livenessCheck && !faceswapCheck && !faceSimilarityCheck) {
+          throw new ValidationError('Please enable at least one check.');
+        }
+        if (faceswapCheck && faceSimilarityCheck) {
+          throw new ValidationError(
+            'faceswapCheck and faceSimilarityCheck cannot be enabled together — ' +
+            'faceswap requires video while similarity requires a photo.',
+          );
         }
       }
-    }
 
-    setCaptureMode(mode);
-    setCameraSessionKey((k: number) => k + 1);
-    setStep(similarity ? 'reference' : 'camera');
-  }, [liveness, faceswap, similarity, hasCamPermission, requestCamPermission, hasMicPermission, requestMicPermission, handleError]);
-
-  const handleToggleFaceswap = useCallback((v: boolean) => {
-    setFaceswap(v);
-    if (v) setSimilarity(false);
-  }, []);
-
-  const handleToggleSimilarity = useCallback((v: boolean) => {
-    setSimilarity(v);
-    if (v) setFaceswap(false);
-    if (!v) setReferenceUri(undefined);
-  }, []);
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP: reference image picker
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  const handlePickReference = useCallback(() => {
-    launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 }, (response) => {
-      if (response.didCancel) return;
-      if (response.errorCode) {
-        handleError(
-          new AuthentaError(`Image picker error: ${response.errorMessage ?? response.errorCode}`),
-        );
-        return;
+      if (!camera.hasPermission && !(await camera.requestPermission())) {
+        throw new AuthentaError('Camera permission is required.');
       }
-      const uri = response.assets?.[0]?.uri;
-      if (!uri) {
-        handleError(new AuthentaError('No image was selected.'));
-        return;
+
+      const resolved = isFI
+        ? resolveCaptureMode(livenessCheck, faceswapCheck, faceSimilarityCheck)
+        : 'photo';
+
+      if (resolved !== 'photo' && !mic.hasPermission && !(await mic.requestPermission())) {
+        throw new AuthentaError('Microphone permission is required for video recording.');
       }
-      setReferenceUri(uri);
+
+      setMode(resolved);
+      if (needsReference) setStep('reference');
+      else toCamera();
     });
-  }, [handleError]);
+  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleReferenceNext = useCallback(() => {
-    if (!referenceUri) return;
-    setCameraSessionKey((k: number) => k + 1);
-    setStep('camera');
-  }, [referenceUri]);
+  const pickReference = useCallback(() => {
+    launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 }, (res) => {
+      if (res.didCancel) return;
+      if (res.errorCode) {
+        fail(new AuthentaError(`Image picker error: ${res.errorMessage ?? res.errorCode}`));
+        return;
+      }
+      const uri = res.assets?.[0]?.uri;
+      if (!uri) fail(new AuthentaError('No image was selected.'));
+      else setReferenceUri(uri);
+    });
+  }, [fail]);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP: camera — capture / record
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  const runProcessing = useCallback(async (uri: string) => {
-    setStep('processing');
-    try {
-      const contentTypeHint = captureMode === 'video' ? 'video/mp4' : 'image/jpeg';
-      const result = await client.uploadAndPoll(uri, modelType, {
-        livenessCheck: liveness,
-        faceswapCheck: faceswap,
-        faceSimilarityCheck: similarity,
-        referenceImage: similarity ? referenceUri : undefined,
-        contentType: contentTypeHint,
+  // ── Capture → upload → poll ─────────────────────────────────────────────────
+  const process = useCallback((uri: string) => {
+    void run('Analysing… please wait', async () => {
+      const media = await client.uploadAndPoll(uri, modelType, {
+        livenessCheck,
+        faceswapCheck,
+        faceSimilarityCheck,
+        referenceImage: faceSimilarityCheck ? referenceUri : undefined,
+        contentType: mode === 'video' ? 'video/mp4' : 'image/jpeg',
       }) as ProcessedMedia;
-      setLastResult(result);
+
+      if (!isOpen.current) return;
+      setResult(media);
       setStep('result');
-      onResult(result);
-    } catch (err) {
-      handleError(err instanceof Error ? err : new AuthentaError(String(err)));
-    }
-  }, [client, modelType, captureMode, liveness, faceswap, similarity, referenceUri, onResult, handleError]);
+      onResult(media);
+    });
+  }, [client, modelType, mode, livenessCheck, faceswapCheck, faceSimilarityCheck,
+      referenceUri, onResult, run, setStep, isOpen]);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP: retry / close
-  // ─────────────────────────────────────────────────────────────────────────────
+  return (
+    <Sheet visible={visible} onRequestClose={close}>
+      {flow.step === 'busy' && <Spinner message={flow.busy} />}
 
-  const handleRetry = useCallback(() => {
-    setLastError(undefined);
-    setCameraSessionKey((k: number) => k + 1);
-    setStep('camera');
-  }, []);
-
-  const handleClose = useCallback(() => {
-    // CameraScreen's unmount cleanup handles stopping any in-progress recording.
-    reset();
-    onClose();
-  }, [reset, onClose]);
-
-  const handleCameraBack = useCallback(() => {
-    // CameraScreen.handleBack() stops recording before calling this callback.
-    setStep(similarity ? 'reference' : 'toggles');
-  }, [similarity]);
-
-  const handleSwitchCamera = useCallback(() => {
-    setCameraPosition(p => p === 'front' ? 'back' : 'front');
-  }, []);
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Render helpers
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  const isFI = modelType.toUpperCase() === 'FI-1';
-
-  // ── Toggles screen ──────────────────────────────────────────────────────────
-  function renderToggles() {
-    return (
-      <ScrollView contentContainerStyle={s.content}>
-        <View style={s.headerRow}>
-          <Text style={s.title}>Detection Options</Text>
-          <TouchableOpacity onPress={handleClose} style={s.closeBtn} hitSlop={HIT_SLOP}>
-            <Text style={s.closeBtnText}>✕</Text>
-          </TouchableOpacity>
-        </View>
-
-        <Text style={s.subtitle}>
-          Enable the checks you need. At least one must be selected.
-        </Text>
-
-        {isFI ? (
-          <>
-            <ToggleRow
-              icon="👁"
-              label="Liveness Check"
-              description="Verify the subject is a live person (photo)"
-              value={liveness}
-              onValueChange={setLiveness}
-            />
-            <ToggleRow
-              icon="🔄"
-              label="Faceswap Check"
-              description="Detect AI face-swap manipulation (video, max 10 s)"
-              value={faceswap}
-              onValueChange={handleToggleFaceswap}
-            />
-            <ToggleRow
-              icon="🪞"
-              label="Face Similarity Check"
-              description="Compare face to a reference photo (photo only)"
-              value={similarity}
-              onValueChange={handleToggleSimilarity}
-            />
-          </>
-        ) : (
-          <View style={s.infoCard}>
-            <Text style={s.infoText}>
-              Model <Text style={s.bold}>{modelType}</Text> will be applied automatically.
-            </Text>
-          </View>
-        )}
-
-        {retryCount.current > 0 && (
-          <Text style={s.retryNote}>
-            Attempt {retryCount.current + 1} of {MAX_RETRIES}
-          </Text>
-        )}
-
-        <TouchableOpacity
-          style={[s.primaryBtn, (!isFI || (!liveness && !faceswap && !similarity)) && s.btnDisabled]}
-          onPress={isFI ? handleContinue : () => { setCameraSessionKey(k => k + 1); setStep('camera'); }}
-          disabled={isFI && !liveness && !faceswap && !similarity}
+      {flow.step === 'reference' && (
+        <Page
+          scroll={false}
+          title="Reference Image"
+          subtitle="Select a clear photo of the face to compare against during detection."
+          onClose={close}
         >
-          <Text style={s.primaryBtnText}>Continue</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    );
-  }
+          {referenceUri ? (
+            <View style={s.preview}>
+              <Image source={{ uri: referenceUri }} style={s.thumb} resizeMode="cover" />
+              <Button label="Change Photo" kind="secondary" onPress={pickReference} />
+            </View>
+          ) : (
+            <Button label="Pick from Library" onPress={pickReference} />
+          )}
+          <Button label="Continue to Camera" onPress={toCamera} disabled={!referenceUri} />
+        </Page>
+      )}
 
-  // ── Reference image screen ──────────────────────────────────────────────────
-  function renderReference() {
-    return (
-      <View style={s.content}>
-        <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => setStep('toggles')} hitSlop={HIT_SLOP}>
-            <Text style={s.backBtn}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={s.title}>Reference Image</Text>
-          <TouchableOpacity onPress={handleClose} hitSlop={HIT_SLOP}>
-            <Text style={s.closeBtnText}>✕</Text>
-          </TouchableOpacity>
-        </View>
+      {flow.step === 'camera' && (
+        <CameraScreen
+          key={session}
+          captureMode={mode}
+          cameraPosition={facing}
+          retryCount={attempts.current}
+          onCaptured={process}
+          onError={fail}
+          // Nothing sits behind the camera unless a reference was picked.
+          onBack={() => needsReference ? setStep('reference') : close()}
+          onSwitchCamera={() => setFacing(p => p === 'front' ? 'back' : 'front')}
+        />
+      )}
 
-        <Text style={s.subtitle}>
-          Select a clear photo of the face to compare against during detection.
-        </Text>
-
-        {referenceUri ? (
-          <View style={s.referencePreview}>
-            <Image source={{ uri: referenceUri }} style={s.referenceThumb} resizeMode="cover" />
-            <TouchableOpacity style={s.secondaryBtn} onPress={handlePickReference}>
-              <Text style={s.secondaryBtnText}>Change Photo</Text>
-            </TouchableOpacity>
+      {flow.step === 'result' && result && (
+        <Page title="Detection Complete">
+          <Outcome ok />
+          <View style={[s.card, s.cardPad]}>
+            <KeyValue label="id"         value={result.id} />
+            <KeyValue label="status"     value={result.status} />
+            <KeyValue label="taskTypeId" value={result.taskTypeId} />
+            {result.result && <>
+              <KeyValue label="isSpoof"         value={result.result.isSpoof} />
+              <KeyValue label="isDeepFake"      value={result.result.isDeepFake} />
+              <KeyValue label="isSimilar"       value={result.result.isSimilar} />
+              <KeyValue label="similarityScore" value={result.result.similarityScore} />
+            </>}
           </View>
-        ) : (
-          <TouchableOpacity style={s.primaryBtn} onPress={handlePickReference}>
-            <Text style={s.primaryBtnText}>Pick from Library</Text>
-          </TouchableOpacity>
-        )}
+          <Button label="Done" onPress={close} />
+        </Page>
+      )}
 
-        <TouchableOpacity
-          style={[s.primaryBtn, !referenceUri && s.btnDisabled]}
-          onPress={handleReferenceNext}
-          disabled={!referenceUri}
-        >
-          <Text style={s.primaryBtnText}>Continue to Camera</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // ── Camera screen ───────────────────────────────────────────────────────────
-  function renderCamera() {
-    return (
-      <CameraScreen
-        key={cameraSessionKey}
-        captureMode={captureMode}
-        cameraPosition={cameraPosition}
-        retryCount={retryCount.current}
-        onCaptured={runProcessing}
-        onError={handleError}
-        onBack={handleCameraBack}
-        onSwitchCamera={handleSwitchCamera}
-      />
-    );
-  }
-
-  // ── Processing screen ────────────────────────────────────────────────────────
-  function renderProcessing() {
-    return (
-      <View style={s.centeredContent}>
-        <ActivityIndicator size="large" color={ACCENT} />
-        <Text style={s.processingText}>Analysing… please wait</Text>
-      </View>
-    );
-  }
-
-  // ── Result screen ────────────────────────────────────────────────────────────
-  function renderResult() {
-    if (!lastResult) return null;
-    const r = lastResult.result;
-    return (
-      <ScrollView contentContainerStyle={s.content}>
-        <View style={s.successIcon}>
-          <Text style={s.successIconText}>✓</Text>
-        </View>
-        <Text style={s.title}>Detection Complete</Text>
-
-        <View style={s.resultCard}>
-          <ResultRow label="id"             value={lastResult.id} />
-          <ResultRow label="status"         value={lastResult.status} />
-          <ResultRow label="taskTypeId"     value={lastResult.taskTypeId} />
-          {r && <>
-            <ResultRow label="isSpoof"         value={r.isSpoof} />
-            <ResultRow label="isDeepFake"      value={r.isDeepFake} />
-            <ResultRow label="isSimilar"       value={r.isSimilar} />
-            <ResultRow label="similarityScore" value={r.similarityScore} />
-          </>}
-        </View>
-
-        <TouchableOpacity style={s.primaryBtn} onPress={handleClose}>
-          <Text style={s.primaryBtnText}>Done</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    );
-  }
-
-  // ── Error screen ─────────────────────────────────────────────────────────────
-  function renderError() {
-    const canRetry = retryCount.current < MAX_RETRIES;
-    return (
-      <View style={s.content}>
-        <View style={s.errorIcon}>
-          <Text style={s.errorIconText}>✕</Text>
-        </View>
-        <Text style={s.title}>Something Went Wrong</Text>
-        <Text style={s.subtitle}>
-          {retryCount.current >= MAX_RETRIES
-            ? `Failed after ${MAX_RETRIES} attempts.`
-            : `Attempt ${retryCount.current} of ${MAX_RETRIES}`}
-        </Text>
-
-        <View style={s.errorCard}>
-          <Text style={s.errorText}>{lastError?.message ?? 'An unknown error occurred.'}</Text>
-        </View>
-
-        {canRetry && (
-          <TouchableOpacity style={s.primaryBtn} onPress={handleRetry}>
-            <Text style={s.primaryBtnText}>Try Again</Text>
-          </TouchableOpacity>
-        )}
-
-        <TouchableOpacity style={s.secondaryBtn} onPress={handleClose}>
-          <Text style={s.secondaryBtnText}>Cancel</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // ── Modal root ────────────────────────────────────────────────────────────────
-  const screens: Record<Step, () => React.ReactNode> = {
-    toggles:    renderToggles,
-    reference:  renderReference,
-    camera:     renderCamera,
-    processing: renderProcessing,
-    result:     renderResult,
-    error:      renderError,
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={handleClose}
-    >
-      <SafeAreaView style={s.safe}>
-        {screens[step]()}
-      </SafeAreaView>
-    </Modal>
+      {flow.step === 'error' && (
+        <ErrorView
+          error={flow.error}
+          attempts={attempts.current}
+          onRetry={toCamera}
+          onClose={close}
+        />
+      )}
+    </Sheet>
   );
 }
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function ToggleRow({
-  icon, label, description, value, onValueChange,
-}: {
-  icon: string;
-  label: string;
-  description: string;
-  value: boolean;
-  onValueChange: (v: boolean) => void;
-}) {
-  return (
-    <TouchableOpacity style={s.toggleRow} onPress={() => onValueChange(!value)} activeOpacity={0.7}>
-      <Text style={s.toggleIcon}>{icon}</Text>
-      <View style={s.toggleText}>
-        <Text style={s.toggleLabel}>{label}</Text>
-        <Text style={s.toggleDesc}>{description}</Text>
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: '#d1d5db', true: ACCENT }}
-        thumbColor="#fff"
-      />
-    </TouchableOpacity>
-  );
-}
-
-function ResultRow({ label, value }: { label: string; value: any }) {
-  if (value === undefined || value === null) return null;
-  return (
-    <View style={s.resultRow}>
-      <Text style={s.resultRowLabel}>{label}</Text>
-      <Text style={s.resultRowValue}>{String(value)}</Text>
-    </View>
-  );
-}
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const ACCENT = '#6366f1';
-const HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const s = StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: '#f9fafb' },
-  content: { padding: 24, paddingBottom: 48 },
-
-  // Header
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  title:      { fontSize: 22, fontWeight: '700', color: '#111827', flex: 1 },
-  subtitle:   { fontSize: 14, color: '#6b7280', lineHeight: 21, marginBottom: 24 },
-  closeBtn:   { padding: 4 },
-  closeBtnText: { fontSize: 18, color: '#9ca3af', fontWeight: '600' },
-  backBtn:    { fontSize: 15, color: ACCENT, fontWeight: '600' },
-
-  // Toggles
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  toggleIcon:  { fontSize: 22, marginRight: 12 },
-  toggleText:  { flex: 1, marginRight: 8 },
-  toggleLabel: { fontSize: 15, fontWeight: '600', color: '#111827' },
-  toggleDesc:  { fontSize: 12, color: '#6b7280', marginTop: 2 },
-
-  // Info card (non-FI models)
-  infoCard: {
-    backgroundColor: '#eff6ff',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 20,
-  },
-  infoText: { fontSize: 14, color: '#1d4ed8', lineHeight: 20 },
-  bold:     { fontWeight: '700' },
-
-  // Retry note
-  retryNote: {
-    textAlign: 'center',
-    fontSize: 13,
-    color: '#f59e0b',
-    marginBottom: 12,
-    fontWeight: '600',
-  },
-
-  // Buttons
-  primaryBtn: {
-    backgroundColor: ACCENT,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 12,
-    marginTop: 8,
-  },
-  primaryBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  btnDisabled:    { opacity: 0.4 },
-  secondaryBtn: {
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 12,
-    borderWidth: 1.5,
-    borderColor: ACCENT,
-  },
-  secondaryBtnText: { color: ACCENT, fontSize: 17, fontWeight: '600' },
-
-  // Reference image
-  referencePreview: { alignItems: 'center', marginBottom: 20 },
-  referenceThumb: {
-    width: 160,
-    height: 160,
-    borderRadius: 12,
-    marginBottom: 12,
-    backgroundColor: '#e5e7eb',
-  },
-
-  // Camera
-  cameraScreen:        { flex: 1, backgroundColor: '#000' },
-  cameraTopOverlay: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  cameraBackBtn:     { paddingVertical: 6, paddingHorizontal: 10, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 },
-  cameraBackBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  cameraModeBadge:   { backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
-  cameraModeBadgeText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  cameraFlipBtn:         { paddingVertical: 6, paddingHorizontal: 10, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, alignItems: 'center' },
-  cameraFlipBtnDisabled: { opacity: 0.35 },
-  cameraFlipBtnText:     { fontSize: 18, color: '#fff' },
-  cameraFlipBtnLabel:    { fontSize: 10, color: '#fff', fontWeight: '600', marginTop: 1 },
-  cameraBottomOverlay: {
-    position: 'absolute',
-    bottom: 0, left: 0, right: 0,
-    paddingBottom: 40,
-    paddingTop: 20,
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  cameraHint:     { color: 'rgba(255,255,255,0.85)', fontSize: 13, marginBottom: 20, textAlign: 'center', paddingHorizontal: 24 },
-  cameraControls:    { flexDirection: 'row', gap: 32, marginBottom: 12 },
-  captureBtnWrapper: { alignItems: 'center', gap: 6 },
-  captureBtnLabel:   { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600' },
-  cameraAttempts: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600' },
-
-  // Capture / record buttons
-  captureBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 4,
-    borderColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captureBtnDisabled: { opacity: 0.45 },
-  captureBtnDot:  { width: 54, height: 54, borderRadius: 27, backgroundColor: '#fff' },
-  recordBtn:      { borderColor: '#ef4444' },
-  recordBtnDot:   { backgroundColor: '#ef4444' },
-  stopBtn:        { borderColor: '#ef4444' },
-  stopBtnSquare:  { width: 28, height: 28, borderRadius: 4, backgroundColor: '#ef4444' },
-
-  // Centered content (processing / no-camera)
-  centeredContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  processingText: {
-    marginTop: 18,
-    fontSize: 15,
-    color: '#6b7280',
-    fontWeight: '500',
-  },
-
-  // Success
-  successIcon: {
-    width: 64, height: 64, borderRadius: 32,
-    backgroundColor: '#d1fae5',
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 16, alignSelf: 'center',
-  },
-  successIconText: { fontSize: 28, color: '#059669', fontWeight: '700' },
-
-  // Result card
-  resultCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    padding: 16,
-    marginVertical: 16,
-  },
-  resultRow:      { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
-  resultRowLabel: { fontSize: 13, color: '#6b7280' },
-  resultRowValue: { fontSize: 13, fontWeight: '600', color: '#111827' },
-
-  // Error
-  errorIcon: {
-    width: 64, height: 64, borderRadius: 32,
-    backgroundColor: '#fee2e2',
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 16, alignSelf: 'center',
-  },
-  errorIconText: { fontSize: 28, color: '#dc2626', fontWeight: '700' },
-  errorCard: {
-    backgroundColor: '#fef2f2',
-    borderRadius: 10,
-    padding: 14,
-    marginVertical: 16,
-  },
-  errorText: { fontSize: 13, color: '#b91c1c', lineHeight: 20 },
-});

@@ -1,8 +1,17 @@
 # @authenta/core
 
-Pure TypeScript API client for the [Authenta](https://authenta.ai) eKYC platform. Works in **Node.js** and **React Native** — no native modules or UI dependencies.
+Pure TypeScript API clients for the [Authenta](https://authenta.ai) platform. Works in **Node.js** and **React Native** — no native modules or UI dependencies.
 
-Use this package directly when you want headless control over uploads, polling, and results. For a ready-made camera capture UI, use [`@authenta/react-native`](https://www.npmjs.com/package/@authenta/react-native).
+The package ships two independent clients:
+
+| Client | Service | Auth | Purpose |
+|---|---|---|---|
+| `AuthentaClient` | Authenta platform | API key | Liveness, faceswap, similarity, deepfake, and embedding detection |
+| `FaceIndexClient` | Your FaceSim host | Tenant UUID only | Enrol faces, then search a photo against them |
+
+They share no state or configuration — use either, or both. Use this package
+directly when you want headless control over uploads, polling, and results. For
+ready-made UI, use [`@authenta/react-native`](https://www.npmjs.com/package/@authenta/react-native).
 
 ---
 
@@ -19,6 +28,12 @@ Use this package directly when you want headless control over uploads, polling, 
 - [Models](#models)
 - [Result fields](#result-fields)
 - [Error Handling](#error-handling)
+- [Face Indexing](#face-indexing)
+  - [Client setup](#client-setup-1)
+  - [Enrolling faces](#enrolling-faces)
+  - [Searching](#searching)
+  - [Search image size](#search-image-size)
+  - [Face indexing errors](#face-indexing-errors)
 - [TypeScript Types](#typescript-types)
 
 ---
@@ -299,9 +314,208 @@ try {
 
 ---
 
+## Face Indexing
+
+`FaceIndexClient` talks to the **FaceSim** server, which is a different service
+from the Authenta platform: its own host, no API key, and every call scoped to a
+tenant UUID. Nothing is shared with `AuthentaClient` — use both side by side.
+
+### Client setup
+
+```ts
+import { FaceIndexClient } from '@authenta/core';
+
+const faces = new FaceIndexClient({
+  baseUrl: 'http://192.168.1.10:8000',            // your FaceSim host
+  tenantId: '6c60ef62-c848-40e3-9cb4-9472ff7b8b58', // must be a UUID
+});
+```
+
+| Option | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `baseUrl` | `string` | Yes | — | FaceSim host. A trailing slash is stripped |
+| `tenantId` | `string` | Yes | — | Tenant UUID. A non-UUID throws `ValidationError` from the constructor |
+| `timeoutMs` | `number` | No | `30000` | Per-request timeout |
+| `maxSearchImageChars` | `number` | No | `200000` | Ceiling on the encoded search image. Deliberately permissive — see [Search image size](#search-image-size) |
+
+### Enrolling faces
+
+Enrollment is a three-party flow: the API returns presigned S3 URLs, the client
+PUTs the bytes to S3, and a Lambda tells the API each object landed. A face is
+only searchable once its embedding is stored, so wait for it:
+
+```ts
+// Upload, then poll until every face is `processed` or `failed`.
+const result = await faces.enrollAndWait([
+  { uri: 'file:///path/front.jpg' },
+  { uri: 'file:///path/left.png' },
+]);
+
+console.log(result.subject_id, result.processedCount, result.failedCount);
+for (const face of result.faces) {
+  if (face.status === 'failed') console.warn(face.name, face.error);
+}
+```
+
+`name` and `contentType` are derived from the URI when omitted. Only
+`image/jpeg`, `image/png`, and `image/webp` are accepted — anything else is
+rejected before a subject is created, so no half-built record is left behind.
+Between 1 and 10 images may be enrolled at a time.
+
+Split the steps when you want progress feedback:
+
+```ts
+const created = await faces.enrollImages(images);      // uploaded to S3
+const result  = await faces.waitForEnrollment(created.subject_id);
+```
+
+### Searching
+
+Search is independent of enrollment — it matches against every processed face
+for the tenant, including ones enrolled in an earlier session.
+
+```ts
+const response = await faces.searchByUri('file:///path/query.jpg', { limit: 10 });
+
+for (const match of response.results) {
+  console.log(match.rank, match.subject_id, match.similarity_score);
+}
+```
+
+`search()` accepts standard Base64, URL-safe Base64, or a
+`data:image/…;base64,…` value, and normalizes it. `limit` defaults to 50 and is
+clamped to 1–50. The same subject can appear more than once because every
+enrolled face has its own embedding. Only faces with `status: "processed"` are
+searched; a tenant with none returns `count: 0`.
+
+#### Search image size
+
+`GET /v1/search` carries the whole image in the query string, so the request
+line must fit the server's URI limit. Exceed it and the **proxy** rejects the
+call with `414 Request-URI Too Large` before FastAPI sees it — nginx allows
+8 KB by default, which is roughly a 200 px JPEG.
+
+That limit is a deployment detail, so the SDK does not ask callers to guess it:
+
+- `maxSearchImageChars` defaults to `200000` — permissive, so the *server*
+  decides what fits.
+- A server `414` is surfaced as a `FaceIndexError` with code `uri_too_long`.
+- The same code is used when an image exceeds `maxSearchImageChars` locally, so
+  a caller retrying with a smaller image branches on one condition.
+
+`@authenta/react-native` uses this to negotiate automatically: it sends the best
+quality first and steps down only on `uri_too_long`, then reuses the size that
+worked. Callers of core directly can do the same:
+
+```ts
+for (const width of [800, 512, 384, 288, 224, 160]) {
+  try {
+    return await faces.search(await encodeAt(width));
+  } catch (err) {
+    if (err.code !== 'uri_too_long') throw err;
+  }
+}
+```
+
+Set `maxSearchImageChars` when you *do* know the limit, to skip the failed round
+trips:
+
+```ts
+const faces = new FaceIndexClient({
+  baseUrl, tenantId,
+  maxSearchImageChars: 7000,   // matches nginx's default 8 KB request line
+});
+```
+
+Two ways to get better match quality, both server-side:
+
+```nginx
+# 1. Raise the URI limit…
+large_client_header_buffers 4 64k;
+```
+
+**2.** Better still, have the server accept a binary `POST` body — the FaceSim
+`API.md` calls this "the recommended future contract for larger images". It
+removes the URI limit from the picture entirely.
+
+> `search()` and `searchByUri()` do no resizing — core is platform-agnostic and
+> ships no image codec. `searchByUri()` sends the file as it is on disk, so
+> downscale before calling it outside React Native.
+
+### Other methods
+
+| Method | Purpose |
+|---|---|
+| `isReady()` | `true` when the server and its database respond |
+| `enroll(images)` | Create the subject and get presigned URLs (no upload) |
+| `getTenant()` | Every subject and face for the tenant |
+| `getSubjectFaces(id)` | Faces for one subject, merged across duplicate rows |
+
+### Face statuses
+
+| Status | Meaning |
+|---|---|
+| `pending` | Upload URL created; S3 acknowledgement not received yet |
+| `uploaded` | S3 object acknowledged; waiting for a worker |
+| `processing` | A worker is generating the embedding |
+| `processed` | Embedding stored; the face is searchable |
+| `failed` | Upload validation or embedding failed — inspect `face.error` |
+
+`waitForEnrollment()` returns once every face reaches `processed` or `failed`.
+A face that fails does not fail the whole enrollment: check `processedCount`
+and `failedCount` on the result.
+
+### Face indexing errors
+
+Failures throw `FaceIndexError` (a subclass of `AuthentaError`) carrying the
+server's `code` and a message safe to show a user. The original server text is
+kept at `error.details.apiMessage`.
+
+```ts
+import { FaceIndexError } from '@authenta/core';
+
+try {
+  await faces.searchByUri('file:///query.jpg');
+} catch (err) {
+  if (err instanceof FaceIndexError) {
+    console.log(err.message);                 // safe to show the user
+    console.log(err.code);                    // e.g. "no_face_detected"
+    console.log(err.details?.apiMessage);     // raw server text
+  }
+}
+```
+
+| HTTP | Code | Message shown |
+|---:|---|---|
+| `403` | `forbidden` | This tenant is not allowed to use face indexing. |
+| `404` | `not_found` | The tenant or record was not found… |
+| `409` | `conflict` / `upload_missing` | …Start a new enrollment. |
+| `422` | `invalid_image` | That image could not be read. Choose a JPEG, PNG, or WebP photo. |
+| `422` | `no_face_detected` | No face was found in that photo… |
+| `414` | `uri_too_long` | The search image is too large to send in the request URL… |
+| `502` | `storage_error` | …temporarily unavailable. Please try again. |
+| `500` | `configuration_error` | The face indexing server is misconfigured… |
+
+`414` is raised by the proxy, not the API, so it arrives as HTML rather than the
+error envelope — it is detected by status code. See
+[Search image size](#search-image-size).
+
+FastAPI request-validation failures (`{ detail: [...] }`) surface as code
+`validation_error` with the offending fields in the message.
+
+Client-side mistakes — a non-UUID tenant, an unsupported image type, more than
+10 images, or an enrollment that times out — throw `ValidationError` before or
+instead of a request, so no half-built subject is left on the server.
+
+`502`/`503`/`504` are retried twice with bounded backoff before throwing.
+Requests time out after `timeoutMs` (default 30 s).
+
+---
+
 ## TypeScript Types
 
 ```ts
+// Detection
 import type {
   AuthentaClientConfig,
   ModelType,
@@ -317,6 +531,36 @@ import type {
   ProcessedMedia,
   Artifact,
   TaskType,
+} from '@authenta/core';
+
+// Face indexing
+import type {
+  FaceIndexClientConfig,
+  LocalFaceImage,
+  EnrollImageDescriptor,
+  EnrollResponse,
+  EnrollFaceUpload,
+  EnrollmentResult,
+  EnrollmentPollingOptions,
+  TenantResponse,
+  TenantSubject,
+  TenantFace,
+  SearchResponse,
+  SearchMatch,
+  FaceStatus,
+  FaceImageContentType,
+} from '@authenta/core';
+```
+
+Runtime constants are exported too:
+
+```ts
+import {
+  SUPPORTED_FACE_IMAGE_TYPES, // ['image/jpeg', 'image/png', 'image/webp']
+  MIN_ENROLL_IMAGES,          // 1
+  MAX_ENROLL_IMAGES,          // 10
+  MAX_SEARCH_LIMIT,           // 50
+  TERMINAL_FACE_STATUSES,     // ['processed', 'failed']
 } from '@authenta/core';
 ```
 
@@ -365,6 +609,39 @@ interface DetectionResult {
   faceVector?:            number[];
   RealConfidencePercent?: number  | string;
   [key: string]: any;
+}
+
+// Returned by enrollAndWait() / waitForEnrollment()
+interface EnrollmentResult {
+  subject_id:     string;
+  faces:          TenantFace[];
+  processedCount: number;   // searchable
+  failedCount:    number;   // inspect each face's `error`
+}
+
+interface TenantFace {
+  face_id:   string;
+  name:      string;
+  status:    FaceStatus;    // 'pending' | 'uploaded' | 'processing' | 'processed' | 'failed'
+  embedding: number[] | null;
+  image_url: string;        // presigned, expires in ~5 min
+  error:     string | null;
+}
+
+// Returned by search() / searchByUri()
+interface SearchResponse {
+  tenant_id: string;
+  count:     number;
+  results:   SearchMatch[];  // highest similarity first
+}
+
+interface SearchMatch {
+  rank:             number;
+  subject_id:       string;
+  face_id:          string;
+  name:             string;
+  image_url:        string;
+  similarity_score: number;
 }
 ```
 
