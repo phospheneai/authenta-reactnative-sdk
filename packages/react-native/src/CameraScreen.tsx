@@ -57,7 +57,7 @@ export function CameraScreen({
   // keyed component they are recreated fresh for every new session.
   const photoOutput = usePhotoOutput({ containerFormat: 'jpeg' });
   const videoOutput = useVideoOutput({
-    enableAudio: captureMode !== 'photo',
+    enableAudio: false,
     fileType: 'mp4',
     targetBitRate: 1_500_000,
   });

@@ -1,48 +1,41 @@
 /**
  * Authenta Demo App — the ONLY file a client developer needs to write.
  *
- * A. Detection (Authenta platform)
- *    Configure AuthentaClient with your domain + key, toggle which checks to
- *    run, and tap Start. AuthentaCapture opens the camera, captures a photo or
- *    video (whichever the checks require), compresses and uploads it, polls,
- *    and returns the finished ProcessedMedia.
+ * One client, one component, four toggles:
  *
- * B. Face indexing (FaceSim server — separate host, tenant ID only)
- *    Turn on "Image Indexing" and tap Start. AuthentaFaceIndex uploads photos,
- *    waits for the embeddings, and searches a face from camera or library.
+ *   Detection      liveness / faceswap / similarity → AuthentaCapture opens the
+ *                  camera (photo, video, or both per the toggles), uploads,
+ *                  polls, and returns the finished ProcessedMedia.
  *
- * Either way the SDK handles permissions, capture, compression, upload, S3,
- * polling, retries, and error UI. You just read the result.
+ *   Face indexing  imageIndexing → the same component switches to enrol/search:
+ *                  add photos of a person, or match a face against them.
+ *
+ * The two are mutually exclusive — face indexing runs no detection model.
+ * The SDK handles permissions, capture, compression, upload, polling, and
+ * error UI. You just read the result.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Image, SafeAreaView, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View,
 } from 'react-native';
 
-import { AuthentaClient, FaceIndexClient } from '@authenta/core';
-import type { EnrollmentResult, ProcessedMedia, SearchResponse } from '@authenta/core';
-import { AuthentaCapture, AuthentaFaceIndex } from '@authenta/react-native';
+import { AuthentaClient } from '@authenta/core';
+import type { EnrollResponse, ProcessedMedia, SearchResponse } from '@authenta/core';
+import { AuthentaCapture } from '@authenta/react-native';
 
-// ─── 1. Detection client — your domain and API key ───────────────────────────
+// ─── One client for both features — your domain and API key ──────────────────
 
 const client = new AuthentaClient({
-  baseUrl: 'https://platform.authenta.ai',
-  api_key: 'api_92b353deafca5b2c394e5eaa14f6708df21bb45078eb28f973cc0dc9df0b3542',
+  baseUrl: 'https://platform-dev.authenta.ai',
+  api_key: 'api_d5bf8bb1716d1ff64c5669709946d6afd578ab3b98e9cf41a40196c408f3cd08',
   auth_enabled: true,
 });
-
-// ─── 2. Face indexing server — your own host, no API key ─────────────────────
-// On a device, 127.0.0.1 is the phone itself: use your machine's LAN IP (and
-// allow cleartext traffic for that host on Android/iOS).
-
-const FACE_INDEX_BASE_URL  = 'http://13.217.226.32';
-const FACE_INDEX_TENANT_ID = '6c60ef62-c848-40e3-9cb4-9472ff7b8b58';
 
 const CHECKS = [
   { key: 'liveness',   label: 'Liveness Check',        hint: 'Photo — is this a real live face?' },
   { key: 'faceswap',   label: 'Faceswap Check',        hint: 'Video (10 s) — detect AI face-swap' },
-  { key: 'similarity', label: 'Face Similarity Check', hint: 'Photo — compare face to reference image' },
+  { key: 'similarity', label: 'Face Similarity Check', hint: 'Photo — compare face to a reference' },
 ] as const;
 
 type CheckKey = typeof CHECKS[number]['key'];
@@ -53,32 +46,20 @@ export default function App() {
     liveness: false, faceswap: false, similarity: false,
   });
   const [indexing, setIndexing] = useState(false);
-
-  const [openModal, setOpenModal] = useState<'capture' | 'index' | null>(null);
+  const [open, setOpen] = useState(false);
 
   // Whatever the SDK hands back.
-  const [result, setResult]         = useState<ProcessedMedia | null>(null);
-  const [enrollment, setEnrollment] = useState<EnrollmentResult | null>(null);
-  const [matches, setMatches]       = useState<SearchResponse | null>(null);
-  const [error, setError]           = useState<string | null>(null);
-
-  // The constructor validates the tenant UUID, so keep a bad config visible
-  // instead of crashing at startup.
-  const faceClient = useMemo(() => {
-    try {
-      return new FaceIndexClient({ baseUrl: FACE_INDEX_BASE_URL, tenantId: FACE_INDEX_TENANT_ID });
-    } catch {
-      return null;
-    }
-  }, []);
+  const [result, setResult]     = useState<ProcessedMedia | null>(null);
+  const [enrolled, setEnrolled] = useState<EnrollResponse | null>(null);
+  const [matches, setMatches]   = useState<SearchResponse | null>(null);
+  const [error, setError]       = useState<string | null>(null);
 
   const anyCheck = Object.values(checks).some(Boolean);
-  const canStart = indexing ? !!faceClient : anyCheck;
+  const canStart = indexing || anyCheck;
 
-  const clear = () => { setResult(null); setEnrollment(null); setMatches(null); setError(null); };
+  const clear = () => { setResult(null); setEnrolled(null); setMatches(null); setError(null); };
 
-  // Face indexing is a different server and runs no detection model, so the two
-  // are mutually exclusive: turning it on clears every check.
+  // Face indexing runs no detection model, so turning it on clears the checks.
   function toggleIndexing(value: boolean) {
     setIndexing(value);
     if (value) setChecks({ liveness: false, faceswap: false, similarity: false });
@@ -106,27 +87,16 @@ export default function App() {
           returns the result.
         </Text>
 
-        {/* Face indexing runs against a different server, so it is its own mode */}
         <View style={s.card}>
           <Text style={s.cardTitle}>Face Indexing</Text>
           <Toggle
             label="Image Indexing"
-            hint="Upload photos to index a face, then search for it"
+            hint="Index a person's photos, then search for that face"
             value={indexing}
             onChange={toggleIndexing}
             last
           />
         </View>
-
-        {indexing && !faceClient && (
-          <View style={s.errorCard}>
-            <Text style={s.errorTitle}>Face indexing not configured</Text>
-            <Text style={s.errorText}>
-              FACE_INDEX_TENANT_ID must be a valid UUID and FACE_INDEX_BASE_URL
-              must point at your FaceSim server.
-            </Text>
-          </View>
-        )}
 
         <View style={[s.card, indexing && s.muted]}>
           <Text style={s.cardTitle}>
@@ -147,7 +117,7 @@ export default function App() {
 
         <TouchableOpacity
           style={[s.start, !canStart && s.startOff]}
-          onPress={() => { clear(); setOpenModal(indexing ? 'index' : 'capture'); }}
+          onPress={() => { clear(); setOpen(true); }}
           disabled={!canStart}
         >
           <Text style={s.startText}>
@@ -172,13 +142,14 @@ export default function App() {
           </Card>
         )}
 
-        {enrollment && (
-          <Card title="Indexed Faces">
-            <Line label="Subject ID" value={enrollment.subject_id} />
-            <Line label="Indexed"    value={`${enrollment.processedCount} of ${enrollment.faces.length}`} />
+        {enrolled && (
+          <Card title="Faces Indexed">
+            <Line label="Subject ID" value={enrolled.subject_id} />
+            <Line label="Status"     value={enrolled.status} />
+            <Line label="Photos"     value={enrolled.faces.length} />
             <View style={s.divider} />
-            {enrollment.faces.map(face => (
-              <Line key={face.face_id} label={face.name} value={face.error ?? face.status} />
+            {enrolled.faces.map(face => (
+              <Line key={face.face_id} label={face.face_id.slice(0, 8) + '…'} value={face.status} />
             ))}
           </Card>
         )}
@@ -208,32 +179,23 @@ export default function App() {
         )}
       </ScrollView>
 
-      {/* ── 3. The SDK modals ─────────────────────────────────────────────── */}
+      {/* ── The SDK — one component, driven by the four toggles ───────────── */}
       <AuthentaCapture
         client={client}
-        modelType="FI-1"
-        visible={openModal === 'capture'}
+        visible={open}
+        onClose={() => setOpen(false)}
+
         livenessCheck={checks.liveness}
         faceswapCheck={checks.faceswap}
         faceSimilarityCheck={checks.similarity}
-        onClose={() => setOpenModal(null)}
-        onResult={(res) => { setOpenModal(null); setResult(res); setError(null); }}
-        onError={(err) => { setOpenModal(null); setError(err.message); }}
-      />
+        faceIndexing={indexing}
 
-      {faceClient && (
-        <AuthentaFaceIndex
-          client={faceClient}
-          visible={openModal === 'index'}
-          maxImages={3}
-          onClose={() => setOpenModal(null)}
-          // The modal stays open so the user can keep searching — these just
-          // mirror the data into this screen.
-          onEnrolled={(res) => { setEnrollment(res); setError(null); }}
-          onSearchResult={(res) => { setMatches(res); setError(null); }}
-          onError={(err) => setError(err.message)}
-        />
-      )}
+        onResult={(res) => { setOpen(false); setResult(res); setError(null); }}
+        // Indexing keeps the modal open so the user can enrol or search again.
+        onEnrolled={(res) => { setEnrolled(res); setError(null); }}
+        onSearchResult={(res) => { setMatches(res); setError(null); }}
+        onError={(err) => setError(err.message)}
+      />
     </SafeAreaView>
   );
 }

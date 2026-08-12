@@ -120,15 +120,6 @@ export const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   tileXText: { color: '#fff', fontSize: 13, fontWeight: '700', lineHeight: 16 },
-  slot: {
-    width: 96, height: 96,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: '#d1d5db',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  slotText: { fontSize: 24, color: '#9ca3af' },
 
   // Search results
   rank:      { width: 26, height: 26, borderRadius: 13, backgroundColor: '#eef2ff', alignItems: 'center', justifyContent: 'center' },

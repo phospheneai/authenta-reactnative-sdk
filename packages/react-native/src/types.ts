@@ -1,69 +1,62 @@
 /**
- * Public props and internal flow types for both modals.
+ * Public props and internal flow types.
  */
 
 import type {
   AuthentaClient,
-  AuthentaError,
-  EnrollmentResult,
-  FaceIndexClient,
+  EnrollResponse,
   ModelType,
   ProcessedMedia,
   SearchResponse,
 } from '@authenta/core';
 
-// ─── Detection (AuthentaCapture) ──────────────────────────────────────────────
-
 export interface AuthentaCaptureProps {
-  /** Initialized AuthentaClient instance. */
+  /** Initialized AuthentaClient — one client serves both features. */
   client: AuthentaClient;
-  /** Model type to run against. Defaults to 'FI-1'. */
-  modelType?: ModelType;
   /** Controls modal visibility. */
   visible: boolean;
   /** Called when the user dismisses the modal. */
   onClose: () => void;
-  /** Called with the fully-processed result when detection completes. */
-  onResult: (result: ProcessedMedia) => void;
-  /** Called on API or capture errors. */
-  onError?: (error: Error | AuthentaError) => void;
+
+  // ── The four toggles the host app owns ─────────────────────────────────────
   /** Run the liveness check (photo). */
   livenessCheck?: boolean;
-  /** Run the faceswap check (video). Cannot be combined with faceSimilarityCheck. */
+  /** Run the faceswap check (video). */
   faceswapCheck?: boolean;
   /** Run the face similarity check (photo + reference image). */
   faceSimilarityCheck?: boolean;
-}
+  /** Index and search faces instead of running a detection model. */
+  faceIndexing?: boolean;
 
-/** The host app picks the checks, so capture opens straight into `busy`. */
-export type CaptureStep = 'busy' | 'reference' | 'camera' | 'result' | 'error';
+  /** Reference photo for faceSimilarityCheck — the host app supplies it. */
+  referenceImage?: string;
+  /** Detection model to run. Defaults to 'FI-1'. */
+  modelType?: ModelType;
+  /** How many photos may be indexed at once. Defaults to 3. */
+  maxImages?: number;
+
+  // ── Results ────────────────────────────────────────────────────────────────
+  /** Detection finished. */
+  onResult?: (result: ProcessedMedia) => void;
+  /** Faces uploaded for indexing. */
+  onEnrolled?: (result: EnrollResponse) => void;
+  /** A face search returned matches. */
+  onSearchResult?: (result: SearchResponse) => void;
+  /** Validation, capture, or API error. */
+  onError?: (error: Error) => void;
+}
 
 export type CaptureMode = 'photo' | 'video' | 'both';
 export type CameraPosition = 'front' | 'back';
 
-// ─── Face indexing (AuthentaFaceIndex) ────────────────────────────────────────
+/** Detection: camera → analyse → result. The host already chose the checks. */
+export type DetectionStep = 'busy' | 'camera' | 'result' | 'error';
 
-export interface AuthentaFaceIndexProps {
-  /** Initialized FaceIndexClient — points at the FaceSim server, not Authenta. */
-  client: FaceIndexClient;
-  /** Controls modal visibility. */
-  visible: boolean;
-  /** Called when the user dismisses the modal. */
-  onClose: () => void;
-  /** Called once every enrolled face has settled as processed or failed. */
-  onEnrolled?: (result: EnrollmentResult) => void;
-  /** Called with the ranked matches each time a search completes. */
-  onSearchResult?: (response: SearchResponse) => void;
-  /** Called on validation, network, or API errors. */
-  onError?: (error: Error | AuthentaError) => void;
-  /** How many photos may be indexed at once. Defaults to 3. */
-  maxImages?: number;
-}
-
+/** Face indexing: pick enrol or search, then a source for the photos. */
 export type FaceIndexStep =
-  | 'enroll' | 'busy' | 'enrolled' | 'source' | 'camera' | 'results' | 'error';
+  | 'mode' | 'enroll' | 'source' | 'camera' | 'busy' | 'enrolled' | 'results' | 'error';
 
-/** An image chosen from the library, before it is prepared for upload. */
+/** An image chosen from the library or captured, before upload. */
 export interface PickedImage {
   uri: string;
   name?: string;

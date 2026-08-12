@@ -1,12 +1,4 @@
-/**
- * FaceSim (face indexing) API contract.
- *
- * This is a standalone service: its own host, its own tenant model, and no
- * authentication header. It shares nothing with the Authenta job API beyond
- * local file handling.
- */
 
-/** Content types the FaceSim server accepts for enrollment and search. */
 export const SUPPORTED_FACE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export type FaceImageContentType = typeof SUPPORTED_FACE_IMAGE_TYPES[number];
 
@@ -22,22 +14,7 @@ export type FaceStatus = 'pending' | 'uploaded' | 'processing' | 'processed' | '
 /** A face has settled once it can no longer change. */
 export const TERMINAL_FACE_STATUSES: FaceStatus[] = ['processed', 'failed'];
 
-export interface FaceIndexClientConfig {
-  /** Base URL of the FaceSim server, e.g. 'http://192.168.1.20:8000'. */
-  baseUrl: string;
-  /** Tenant UUID. The server scopes every operation to this tenant. */
-  tenantId: string;
-  /** Per-request timeout in ms for non-search requests. Default 30000. */
-  timeoutMs?: number;
-  /**
-   * Search timeout in ms. Default 120000 because large image transfers and face
-   * embedding take longer than the other FaceIndex operations.
-   * When omitted, an explicitly supplied `timeoutMs` is also used for search.
-   */
-  searchTimeoutMs?: number;
-}
-
-// ─── POST /v1/enroll ──────────────────────────────────────────────────────────
+// ─── POST /api/v1/facesim/enroll ──────────────────────────────────────────────
 
 export interface EnrollImageDescriptor {
   name: string;
@@ -58,7 +35,7 @@ export interface EnrollResponse {
   expires_at: string;
 }
 
-// ─── GET /v1/tenant ───────────────────────────────────────────────────────────
+// ─── GET /api/v1/facesim/subjects ─────────────────────────────────────────────
 
 export interface TenantFace {
   face_id: string;
@@ -79,7 +56,7 @@ export interface TenantResponse {
   subjects: TenantSubject[];
 }
 
-// ─── POST /v1/search ──────────────────────────────────────────────────────────
+// ─── POST /api/v1/facesim/search ──────────────────────────────────────────────
 
 export interface SearchMatch {
   rank: number;
@@ -98,29 +75,20 @@ export interface SearchResponse {
 
 // ─── Local inputs ─────────────────────────────────────────────────────────────
 
-/** A locally-picked image queued for enrollment. */
 export interface LocalFaceImage {
-  /** file:// or content:// URI. */
   uri: string;
-  /** File name sent to the API. Derived from the URI when omitted. */
   name?: string;
-  /** MIME type. Derived from the file extension when omitted. */
   contentType?: string;
 }
 
 export interface EnrollmentPollingOptions {
-  /** ms between /v1/tenant polls. Default 2000. */
   interval?: number;
-  /** ms before giving up. Default 120000. */
   timeout?: number;
 }
 
-/** Outcome of enroll → upload → poll. */
 export interface EnrollmentResult {
   subject_id: string;
   faces: TenantFace[];
-  /** Faces whose embedding was stored and which are now searchable. */
   processedCount: number;
-  /** Faces the server could not embed — inspect each face's `error`. */
   failedCount: number;
 }

@@ -2,9 +2,8 @@
 import 'react-native-blob-util';
 
 export { AuthentaCapture } from './AuthentaCapture';
-export { AuthentaFaceIndex } from './AuthentaFaceIndex';
-export type { AuthentaCaptureProps, AuthentaFaceIndexProps } from './types';
+export type { AuthentaCaptureProps } from './types';
 
 // Re-export @authenta/core so apps only need @authenta/react-native — they can
-// import AuthentaClient and FaceIndexClient from here too.
+// import AuthentaClient from here too.
 export * from '@authenta/core';

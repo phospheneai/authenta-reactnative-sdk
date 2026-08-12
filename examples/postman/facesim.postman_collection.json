@@ -1,0 +1,191 @@
+{
+  "info": {
+    "name": "Authenta — Face Indexing",
+    "description": "Face indexing (facesim) endpoints, matching exactly what @authenta/core sends.\n\n## Setup\n\nSet the collection variables:\n\n- `baseUrl` — e.g. https://platform-dev.authenta.ai\n- `apiKey`  — your Authenta API key (sent as `Authorization: Bearer <apiKey>`)\n\n## Order\n\nRun the requests top to bottom. Each one saves what the next needs:\n\n1. **Enroll** creates the subject and returns a presigned upload URL per image.\n   Its test script saves `subjectId`, `uploadUrl`, and `uploadContentType`.\n2. **Upload image to S3** PUTs the raw file to that URL. Pick your file in the\n   Body tab (binary). This request deliberately sends **no** Authorization\n   header — adding one makes S3 reject the signature.\n3. **List subjects** shows every face and its status. Embeddings are generated\n   in the background, so re-run this until the face reaches `processed`.\n4. **Search a face** ranks the indexed faces against a query photo.\n\n## Preparing `queryImageBase64` for search\n\nThe search body carries the image as URL-safe Base64. Generate it with:\n\n```bash\n# macOS\nbase64 -i photo.jpg | tr -d '\\n' | tr '+/' '-_' | tr -d '=' | pbcopy\n\n# Linux\nbase64 -w0 photo.jpg | tr '+/' '-_' | tr -d '='\n```\n\nPaste the result into the `queryImageBase64` variable. The API also accepts\nstandard Base64 and `data:image/...;base64,...` values.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{apiKey}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://platform-dev.authenta.ai", "type": "string" },
+    { "key": "apiKey", "value": "", "type": "string" },
+    { "key": "enrollImageName", "value": "front.jpg", "type": "string" },
+    { "key": "enrollContentType", "value": "image/jpeg", "type": "string" },
+    { "key": "subjectId", "value": "", "type": "string" },
+    { "key": "uploadUrl", "value": "", "type": "string" },
+    { "key": "uploadContentType", "value": "image/jpeg", "type": "string" },
+    { "key": "queryImageBase64", "value": "", "type": "string" },
+    { "key": "searchLimit", "value": "50", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Enroll — create subject + upload URLs",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 or 200', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('returns a subject_id', () => pm.expect(body.subject_id).to.be.a('string'));",
+              "pm.test('returns one face per image', () => pm.expect(body.faces).to.be.an('array').that.is.not.empty);",
+              "",
+              "// Hand the next requests what they need.",
+              "pm.collectionVariables.set('subjectId', body.subject_id);",
+              "pm.collectionVariables.set('uploadUrl', body.faces[0].upload_url);",
+              "pm.collectionVariables.set('uploadContentType',",
+              "  (body.faces[0].headers && body.faces[0].headers['Content-Type']) || pm.collectionVariables.get('enrollContentType'));",
+              "",
+              "console.log('subject_id :', body.subject_id);",
+              "console.log('faces      :', body.faces.length);",
+              "console.log('expires_at :', body.expires_at);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\n  \"images\": [\n    {\n      \"name\": \"{{enrollImageName}}\",\n      \"contentType\": \"{{enrollContentType}}\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/facesim/enroll",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "facesim", "enroll"]
+        },
+        "description": "Creates one subject and one face row per image, returning a presigned S3 PUT URL for each.\n\n**Body** — 1 to 10 images. `contentType` must be `image/jpeg`, `image/png`, or `image/webp`.\n\n```json\n{\n  \"images\": [\n    { \"name\": \"front.jpg\", \"contentType\": \"image/jpeg\" },\n    { \"name\": \"left.png\",  \"contentType\": \"image/png\" }\n  ]\n}\n```\n\nThe `faces` array comes back in the same order as `images`.\n\n**Response**\n\n```json\n{\n  \"subject_id\": \"…\",\n  \"status\": \"pending\",\n  \"faces\": [\n    { \"face_id\": \"…\", \"status\": \"pending\", \"upload_url\": \"https://…\", \"headers\": { \"Content-Type\": \"image/jpeg\" } }\n  ],\n  \"expires_at\": \"…\"\n}\n```"
+      }
+    },
+    {
+      "name": "2. Upload image to S3 (PUT)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('S3 accepted the upload', () => pm.response.to.have.status(200));",
+              "",
+              "if (pm.response.code === 403) {",
+              "  console.log('403 SignatureDoesNotMatch usually means the Content-Type differs');",
+              "  console.log('from the one returned by /enroll, or the URL has expired (15 min).');",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "{{uploadContentType}}" }],
+        "body": { "mode": "file", "file": {} },
+        "url": { "raw": "{{uploadUrl}}" },
+        "description": "PUTs the raw image bytes straight to S3.\n\n**Pick your file** in Body → binary. It must be the same image you named in the enroll request.\n\nRules:\n\n- Send the file itself — not Base64, not multipart form data.\n- The `Content-Type` must match what `/enroll` returned, or S3 answers `403 SignatureDoesNotMatch`.\n- **No Authorization header** — this request is set to `noauth` on purpose. Sending the API key breaks the presigned signature.\n- Presigned URLs expire after ~15 minutes; re-run step 1 if yours has.\n\nA `200` means the object landed. The embedding is generated afterwards, out of band."
+      }
+    },
+    {
+      "name": "3. List subjects (check status)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const body = pm.response.json();",
+              "const subjects = body.subjects || [];",
+              "pm.test('returns a subjects array', () => pm.expect(subjects).to.be.an('array'));",
+              "",
+              "// Report the subject created in step 1.",
+              "const id = pm.collectionVariables.get('subjectId');",
+              "const mine = subjects.filter(s => s.subject_id === id);",
+              "const faces = mine.reduce((all, s) => all.concat(s.faces || []), []);",
+              "",
+              "if (faces.length) {",
+              "  faces.forEach(f => console.log(`${f.face_id}  ${f.status}${f.error ? '  — ' + f.error : ''}`));",
+              "  const settled = faces.every(f => f.status === 'processed' || f.status === 'failed');",
+              "  console.log(settled ? 'All faces settled.' : 'Still processing — run this again in a moment.');",
+              "} else if (id) {",
+              "  console.log('Subject ' + id + ' not found yet.');",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/facesim/subjects",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "facesim", "subjects"]
+        },
+        "description": "Every subject and face on the account. Use it to watch enrolment finish.\n\n| Status | Meaning |\n|---|---|\n| `pending` | Upload URL created; the object has not been acknowledged yet |\n| `uploaded` | Stored; waiting for a worker |\n| `processing` | A worker is generating the embedding |\n| `processed` | Embedding stored — the face is searchable |\n| `failed` | Upload validation or embedding failed — see `error` |\n\nOnly `processed` faces are returned by search. The console output lists the status of every face belonging to the subject from step 1."
+      }
+    },
+    {
+      "name": "4. Search a face",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('queryImageBase64')) {",
+              "  console.warn('queryImageBase64 is empty. Generate it with:');",
+              "  console.warn(\"  base64 -i photo.jpg | tr -d '\\\\n' | tr '+/' '-_' | tr -d '='\");",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('returns a results array', () => pm.expect(body.results).to.be.an('array'));",
+              "pm.test('count matches results length', () => pm.expect(body.count).to.eql(body.results.length));",
+              "",
+              "if (body.count === 0) {",
+              "  console.log('No match. Either nothing is `processed` yet, or the face did not match.');",
+              "} else {",
+              "  body.results.forEach(m =>",
+              "    console.log(`#${m.rank}  ${(m.similarity_score * 100).toFixed(1)}%  subject ${m.subject_id}  ${m.name}`));",
+              "}",
+              "",
+              "if (pm.response.code === 422) {",
+              "  console.log('422 — invalid_image (not decodable) or no_face_detected (no face found).');",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "options": { "raw": { "language": "json" } },
+          "raw": "{\n  \"image_bytes\": \"{{queryImageBase64}}\",\n  \"limit\": {{searchLimit}}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/facesim/search",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "facesim", "search"]
+        },
+        "description": "Embeds the query image and returns indexed faces ranked by similarity.\n\n**Body**\n\n```json\n{ \"image_bytes\": \"<url-safe base64>\", \"limit\": 50 }\n```\n\n`limit` is clamped to 1–50. The image goes in the body, not the query string, so there is no URL length limit.\n\n**Response**\n\n```json\n{\n  \"tenant_id\": \"…\",\n  \"count\": 1,\n  \"results\": [\n    { \"rank\": 1, \"subject_id\": \"…\", \"face_id\": \"…\", \"name\": \"front.jpg\", \"image_url\": \"https://…\", \"similarity_score\": 0.913 }\n  ]\n}\n```\n\nResults run highest similarity first. The same subject can appear more than once because every enrolled face has its own embedding.\n\n**Send the photo untouched.** Re-encoding it can rewrite the EXIF orientation and leave face detection looking at a sideways image, which comes back as `no_face_detected`."
+      }
+    }
+  ]
+}
