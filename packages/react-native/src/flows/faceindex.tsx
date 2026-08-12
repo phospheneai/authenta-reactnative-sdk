@@ -16,7 +16,7 @@ import { AuthentaError, ValidationError } from '@authenta/core';
 import type { EnrollResponse, SearchResponse } from '@authenta/core';
 
 import { CameraScreen } from '../CameraScreen';
-import { prepareEnrollmentImage } from '../media';
+import { prepareEnrollmentImage, prepareSearchImage } from '../media';
 import { HIT_SLOP, s } from '../theme';
 import type { AuthentaCaptureProps, CameraPosition, FaceIndexStep, PickedImage } from '../types';
 import { Badge, Button, ErrorView, Outcome, Page, Row, Sheet, Spinner, useModalFlow } from '../ui';
@@ -126,8 +126,9 @@ export function FaceIndexFlow({
   const search = useCallback((uri: string) => {
     setQueryUri(uri);
     void run('Matching face…', async () => {
-      // Sent exactly as captured — nothing re-encodes the photo.
-      const response = await client.faceSearch(uri);
+      // Shrunk to fit the API's 100 KiB body cap. The compressor bakes EXIF
+      // rotation into the pixels, which detection depends on.
+      const response = await client.faceSearch(await prepareSearchImage(uri));
 
       if (!isOpen.current) return;
       setMatches(response);

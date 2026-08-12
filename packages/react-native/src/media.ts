@@ -2,12 +2,12 @@
  * Capture-mode resolution and the compression each upload path needs.
  */
 
-import { Image as ImageCompressor, Video } from 'react-native-compressor';
+import { Image as ImageCompressor, Video, getFileSize } from 'react-native-compressor';
 
 import { SUPPORTED_FACE_IMAGE_TYPES, getMimeType } from '@authenta/core';
 import type { LocalFaceImage } from '@authenta/core';
 
-import { VIDEO_SIZE_LIMIT_BYTES } from './theme';
+import { SEARCH_IMAGE_MAX_BYTES, SEARCH_STEPS, VIDEO_SIZE_LIMIT_BYTES } from './theme';
 import type { CaptureMode } from './types';
 
 // ─── Capture ──────────────────────────────────────────────────────────────────
@@ -79,4 +79,41 @@ export async function prepareEnrollmentImage(
     name: `${name.replace(/\.[^./\\]+$/, '') || `face-${index + 1}`}.jpg`,
     contentType: 'image/jpeg',
   };
+}
+
+/**
+ * Shrinks a photo to something the search endpoint accepts, returning the file
+ * URI of the result. Two things matter here, both measured against the live API:
+ *
+ * **Size** — the gateway caps the JSON body at 100 KiB, so the image must fit
+ * SEARCH_IMAGE_MAX_BYTES once Base64-encoded. Each rung is measured on disk and
+ * the first that fits wins, so a request is never sent only to be rejected.
+ *
+ * **Orientation** — `manual` mode bakes the EXIF rotation into the pixels. That
+ * is not cosmetic: a sideways photo either finds no face at all or matches the
+ * *wrong* subject (0.33 against 0.90 for the same face). Never replace this with
+ * a path that leaves rotation to the EXIF tag.
+ *
+ * Detail is not a concern at these sizes — the embedding model crops to 112×112
+ * internally, so 560 px and 160 px score within noise of each other.
+ */
+export async function prepareSearchImage(uri: string): Promise<string> {
+  let result = uri;
+
+  for (const step of SEARCH_STEPS) {
+    result = asFileUri(await ImageCompressor.compress(uri, {
+      compressionMethod: 'manual',
+      output: 'jpg',
+      returnableOutputType: 'uri',
+      ...step,
+    }));
+
+    // If the size cannot be read, take this result rather than shrinking blindly.
+    const bytes = await getFileSize(result).then(Number).catch(() => 0);
+    if (!Number.isFinite(bytes) || bytes <= 0 || bytes <= SEARCH_IMAGE_MAX_BYTES) {
+      return result;
+    }
+  }
+
+  return result;
 }

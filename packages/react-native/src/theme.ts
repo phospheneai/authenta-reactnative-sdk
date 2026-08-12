@@ -10,6 +10,31 @@ export const MAX_RETRIES = 3;
 export const VIDEO_MAX_DURATION_MS = 10_000;
 export const VIDEO_SIZE_LIMIT_BYTES = 6 * 1024 * 1024; // 6 MB
 
+/**
+ * Largest search image the API will take, in bytes.
+ *
+ * `/facesim/v1/search` carries the photo as Base64 inside a JSON body, and the
+ * gateway caps that body at 100 KiB. Base64 costs 4 characters per 3 bytes, so
+ * 100 KiB of body leaves ~76 KB of image; this sits just under it.
+ */
+export const SEARCH_IMAGE_MAX_BYTES = 74_000;
+
+/**
+ * Sizes tried for a search image, largest first.
+ *
+ * Measured against the live API, every size from 560 px down to 160 px returned
+ * the *same* top match within a 1.8-point band (0.8797–0.8974) — the embedding
+ * model crops to 112×112 internally, so extra pixels buy nothing. 560 px scored
+ * highest and fits the budget, so it leads; the smaller rungs only exist for
+ * photos that compress poorly.
+ */
+export const SEARCH_STEPS: Array<{ maxWidth: number; quality: number }> = [
+  { maxWidth: 560, quality: 0.6 },
+  { maxWidth: 480, quality: 0.55 },
+  { maxWidth: 400, quality: 0.5 },
+  { maxWidth: 320, quality: 0.45 },
+];
+
 // ─── Colours ──────────────────────────────────────────────────────────────────
 
 export const ACCENT = '#6366f1';
