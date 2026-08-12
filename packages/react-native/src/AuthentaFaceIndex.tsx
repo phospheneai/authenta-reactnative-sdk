@@ -17,7 +17,7 @@ import { AuthentaError } from '@authenta/core';
 import type { EnrollmentResult, SearchResponse } from '@authenta/core';
 
 import { CameraScreen } from './CameraScreen';
-import { prepareEnrollmentImage, prepareSearchImage } from './media';
+import { prepareEnrollmentImage } from './media';
 import { HIT_SLOP, s } from './theme';
 import type { AuthentaFaceIndexProps, CameraPosition, FaceIndexStep, PickedImage } from './types';
 import { Badge, Button, ErrorView, Outcome, Page, Row, Sheet, Spinner, useModalFlow } from './ui';
@@ -113,7 +113,10 @@ export function AuthentaFaceIndex({
   const search = useCallback((uri: string) => {
     setQueryUri(uri);
     void run('Matching face…', async () => {
-      const response = await client.search(await prepareSearchImage(uri));
+      // Sent exactly as captured: read the file, Base64 it, send. Nothing
+      // re-encodes the photo, so its EXIF orientation stays intact for face
+      // detection.
+      const response = await client.searchByUri(uri);
 
       if (!isOpen.current) return;
       setMatches(response);

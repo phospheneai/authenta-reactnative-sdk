@@ -183,7 +183,8 @@ Face indexing — enrollAndWait()
 
 Face indexing — search()
 ────────────────────────
-   GET /v1/search?tenant_id=…&image_bytes=<base64url>&limit=…
+   POST /v1/search?limit=…
+   JSON { tenant_id, image_bytes: <base64url> }
    →  matches ranked by similarity_score
 ```
 

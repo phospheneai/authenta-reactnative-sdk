@@ -38,14 +38,12 @@ export async function throwFaceIndexError(response: Response): Promise<never> {
   const status = response.status;
   let data: any;
 
-  // 414 comes from the proxy, not the API, so it carries an HTML body rather
-  // than the error envelope. Name the real cause instead of "invalid JSON".
-  if (status === 414) {
+  // Oversized POST bodies may be rejected by the proxy before the API and
+  // therefore carry HTML rather than the normal error envelope.
+  if (status === 413) {
     throw new FaceIndexError(
-      'The search image is too large to send in the request URL. Downscale it, ' +
-      'or raise the URI limit on the face indexing server ' +
-      '(nginx `large_client_header_buffers`) and increase maxSearchImageChars.',
-      'uri_too_long',
+      'The search image is larger than the face indexing server accepts.',
+      'image_too_large',
       status,
     );
   }

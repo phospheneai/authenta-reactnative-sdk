@@ -212,7 +212,25 @@ export async function readFileAsBase64(uri: string): Promise<string> {
   });
 }
 
-/** Convert standard Base64 to the URL-safe, unpadded form the search API prefers. */
+/**
+ * Match Python's `base64.urlsafe_b64encode(...).decode()` output exactly:
+ * URL-safe alphabet, no whitespace, and padding retained.
+ */
 export function toBase64Url(base64: string): string {
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const value = String(base64 ?? '')
+    .replace(/^data:[^,]+,/i, '')
+    .replace(/\s/g, '');
+
+  // Reject corruption locally instead of sending an invalid query to the API.
+  if (!/^[A-Za-z0-9+/_-]*={0,2}$/.test(value)) {
+    throw new AuthentaError('Could not encode the selected image as Base64.', 'invalid_base64');
+  }
+
+  const unpadded = value.replace(/=+$/, '');
+  if (unpadded.length % 4 === 1) {
+    throw new AuthentaError('Could not encode the selected image as Base64.', 'invalid_base64');
+  }
+
+  const urlSafe = unpadded.replace(/\+/g, '-').replace(/\//g, '_');
+  return urlSafe + '='.repeat((4 - (urlSafe.length % 4)) % 4);
 }

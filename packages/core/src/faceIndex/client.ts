@@ -42,16 +42,17 @@ import type {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 
-/** `502 storage_error` is documented as retryable with bounded backoff. */
-const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+/** Match the reference Python client: retry throttling and transient failures. */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const MAX_REQUEST_RETRIES = 2;
 
 export class FaceIndexClient {
   private readonly baseUrl: string;
   private readonly tenantId: string;
   private readonly timeoutMs: number;
+  private readonly searchTimeoutMs: number;
 
-  constructor({ baseUrl, tenantId, timeoutMs = 30_000 }: FaceIndexClientConfig) {
+  constructor({ baseUrl, tenantId, timeoutMs, searchTimeoutMs }: FaceIndexClientConfig) {
     const trimmedUrl = String(baseUrl ?? '').trim().replace(/\/$/, '');
     if (!trimmedUrl) {
       throw new ValidationError('baseUrl is required for the face indexing server.');
@@ -62,7 +63,10 @@ export class FaceIndexClient {
 
     this.baseUrl = trimmedUrl;
     this.tenantId = String(tenantId).trim();
-    this.timeoutMs = timeoutMs;
+    this.timeoutMs = timeoutMs ?? 30_000;
+    // search_face.py waits up to 120 seconds for this endpoint. Preserve an
+    // explicitly supplied legacy timeout, otherwise use the same search budget.
+    this.searchTimeoutMs = searchTimeoutMs ?? timeoutMs ?? 120_000;
   }
 
   /** The tenant every call is scoped to. */
@@ -75,7 +79,15 @@ export class FaceIndexClient {
   private async request<T>(
     method: 'GET' | 'POST',
     path: string,
-    { body, query }: { body?: unknown; query?: Record<string, string | number> } = {},
+    {
+      body,
+      query,
+      timeoutMs = this.timeoutMs,
+    }: {
+      body?: unknown;
+      query?: Record<string, string | number>;
+      timeoutMs?: number;
+    } = {},
   ): Promise<T> {
     let url = `${this.baseUrl}${path}`;
     if (query) {
@@ -89,12 +101,12 @@ export class FaceIndexClient {
 
     for (let attempt = 0; attempt <= MAX_REQUEST_RETRIES; attempt++) {
       if (attempt > 0) {
-        // Bounded exponential backoff: 500ms, 1000ms.
-        await new Promise<void>(r => setTimeout(r, 500 * 2 ** (attempt - 1)));
+        // Same bounded exponential backoff as search_face.py: 1s, 2s.
+        await new Promise<void>(r => setTimeout(r, 1000 * 2 ** (attempt - 1)));
       }
 
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         const response = await fetch(url, {
@@ -121,7 +133,7 @@ export class FaceIndexClient {
         if (isApiError || attempt >= MAX_REQUEST_RETRIES) {
           if (isAbort) {
             throw new ValidationError(
-              `The face indexing server at ${this.baseUrl} did not respond within ${this.timeoutMs}ms.`,
+              `The face indexing server at ${this.baseUrl} did not respond within ${timeoutMs}ms.`,
             );
           }
           throw err;
@@ -278,21 +290,24 @@ export class FaceIndexClient {
    * Only faces with `status: "processed"` are searchable.
    */
   async search(imageBase64: string, { limit = MAX_SEARCH_LIMIT }: { limit?: number } = {}): Promise<SearchResponse> {
-    const bytes = toBase64Url(String(imageBase64 ?? '').replace(/^data:[^,]+,/, ''));
+    const bytes = toBase64Url(imageBase64);
     if (!bytes) {
       throw new ValidationError('A query image is required to search faces.');
     }
 
-    return this.request<SearchResponse>('GET', '/v1/search', {
-      query: {
+    return this.request<SearchResponse>('POST', '/v1/search', {
+      timeoutMs: this.searchTimeoutMs,
+      body: {
         tenant_id: this.tenantId,
         image_bytes: bytes,
+      },
+      query: {
         limit: Math.min(Math.max(Math.trunc(limit), 1), MAX_SEARCH_LIMIT),
       },
     });
   }
 
-  /** Reads a local image and searches with it. Compress large photos first. */
+  /** Reads the original local image bytes and searches with them unchanged. */
   async searchByUri(uri: string, options?: { limit?: number }): Promise<SearchResponse> {
     return this.search(await readFileAsBase64(uri), options);
   }

@@ -27,8 +27,8 @@ import { AuthentaCapture, AuthentaFaceIndex } from '@authenta/react-native';
 // ─── 1. Detection client — your domain and API key ───────────────────────────
 
 const client = new AuthentaClient({
-  baseUrl: '',
-  api_key: '',
+  baseUrl: 'https://platform.authenta.ai',
+  api_key: 'api_92b353deafca5b2c394e5eaa14f6708df21bb45078eb28f973cc0dc9df0b3542',
   auth_enabled: true,
 });
 
@@ -36,8 +36,8 @@ const client = new AuthentaClient({
 // On a device, 127.0.0.1 is the phone itself: use your machine's LAN IP (and
 // allow cleartext traffic for that host on Android/iOS).
 
-const FACE_INDEX_BASE_URL  = '';
-const FACE_INDEX_TENANT_ID = '';
+const FACE_INDEX_BASE_URL  = 'http://13.217.226.32';
+const FACE_INDEX_TENANT_ID = '6c60ef62-c848-40e3-9cb4-9472ff7b8b58';
 
 const CHECKS = [
   { key: 'liveness',   label: 'Liveness Check',        hint: 'Photo — is this a real live face?' },

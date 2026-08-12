@@ -80,17 +80,3 @@ export async function prepareEnrollmentImage(
     contentType: 'image/jpeg',
   };
 }
-
-/**
- * Compresses a photo and returns it as Base64, ready for `client.search()`.
- *
- * Same compressor the rest of the SDK uses. One pass, then send — whatever
- * comes out goes to the server as-is.
- */
-export async function prepareSearchImage(uri: string): Promise<string> {
-  return ImageCompressor.compress(uri, {
-    compressionMethod: 'auto',
-    output: 'jpg',
-    returnableOutputType: 'base64',
-  });
-}

@@ -32,7 +32,6 @@ ready-made UI, use [`@authenta/react-native`](https://www.npmjs.com/package/@aut
   - [Client setup](#client-setup-1)
   - [Enrolling faces](#enrolling-faces)
   - [Searching](#searching)
-  - [Search image size](#search-image-size)
   - [Face indexing errors](#face-indexing-errors)
 - [TypeScript Types](#typescript-types)
 
@@ -335,8 +334,8 @@ const faces = new FaceIndexClient({
 |---|---|---|---|---|
 | `baseUrl` | `string` | Yes | — | FaceSim host. A trailing slash is stripped |
 | `tenantId` | `string` | Yes | — | Tenant UUID. A non-UUID throws `ValidationError` from the constructor |
-| `timeoutMs` | `number` | No | `30000` | Per-request timeout |
-| `maxSearchImageChars` | `number` | No | `200000` | Ceiling on the encoded search image. Deliberately permissive — see [Search image size](#search-image-size) |
+| `timeoutMs` | `number` | No | `30000` | Timeout for non-search requests; when explicitly set it also applies to search |
+| `searchTimeoutMs` | `number` | No | `120000` | Search timeout; large images take longer to transfer and embed |
 
 ### Enrolling faces
 
@@ -388,59 +387,9 @@ clamped to 1–50. The same subject can appear more than once because every
 enrolled face has its own embedding. Only faces with `status: "processed"` are
 searched; a tenant with none returns `count: 0`.
 
-#### Search image size
-
-`GET /v1/search` carries the whole image in the query string, so the request
-line must fit the server's URI limit. Exceed it and the **proxy** rejects the
-call with `414 Request-URI Too Large` before FastAPI sees it — nginx allows
-8 KB by default, which is roughly a 200 px JPEG.
-
-That limit is a deployment detail, so the SDK does not ask callers to guess it:
-
-- `maxSearchImageChars` defaults to `200000` — permissive, so the *server*
-  decides what fits.
-- A server `414` is surfaced as a `FaceIndexError` with code `uri_too_long`.
-- The same code is used when an image exceeds `maxSearchImageChars` locally, so
-  a caller retrying with a smaller image branches on one condition.
-
-`@authenta/react-native` uses this to negotiate automatically: it sends the best
-quality first and steps down only on `uri_too_long`, then reuses the size that
-worked. Callers of core directly can do the same:
-
-```ts
-for (const width of [800, 512, 384, 288, 224, 160]) {
-  try {
-    return await faces.search(await encodeAt(width));
-  } catch (err) {
-    if (err.code !== 'uri_too_long') throw err;
-  }
-}
-```
-
-Set `maxSearchImageChars` when you *do* know the limit, to skip the failed round
-trips:
-
-```ts
-const faces = new FaceIndexClient({
-  baseUrl, tenantId,
-  maxSearchImageChars: 7000,   // matches nginx's default 8 KB request line
-});
-```
-
-Two ways to get better match quality, both server-side:
-
-```nginx
-# 1. Raise the URI limit…
-large_client_header_buffers 4 64k;
-```
-
-**2.** Better still, have the server accept a binary `POST` body — the FaceSim
-`API.md` calls this "the recommended future contract for larger images". It
-removes the URI limit from the picture entirely.
-
-> `search()` and `searchByUri()` do no resizing — core is platform-agnostic and
-> ships no image codec. `searchByUri()` sends the file as it is on disk, so
-> downscale before calling it outside React Native.
+Search uses `POST /v1/search?limit=…`. The JSON body contains `tenant_id` and
+`image_bytes`, keeping large images out of the URL. The SDK sends the original
+file bytes as padded URL-safe Base64 and does not resize or re-encode them.
 
 ### Other methods
 
@@ -490,15 +439,11 @@ try {
 | `403` | `forbidden` | This tenant is not allowed to use face indexing. |
 | `404` | `not_found` | The tenant or record was not found… |
 | `409` | `conflict` / `upload_missing` | …Start a new enrollment. |
+| `413` | `image_too_large` | The image is larger than the server accepts. |
 | `422` | `invalid_image` | That image could not be read. Choose a JPEG, PNG, or WebP photo. |
 | `422` | `no_face_detected` | No face was found in that photo… |
-| `414` | `uri_too_long` | The search image is too large to send in the request URL… |
 | `502` | `storage_error` | …temporarily unavailable. Please try again. |
 | `500` | `configuration_error` | The face indexing server is misconfigured… |
-
-`414` is raised by the proxy, not the API, so it arrives as HTML rather than the
-error envelope — it is detected by status code. See
-[Search image size](#search-image-size).
 
 FastAPI request-validation failures (`{ detail: [...] }`) surface as code
 `validation_error` with the offending fields in the message.
@@ -507,8 +452,9 @@ Client-side mistakes — a non-UUID tenant, an unsupported image type, more than
 10 images, or an enrollment that times out — throw `ValidationError` before or
 instead of a request, so no half-built subject is left on the server.
 
-`502`/`503`/`504` are retried twice with bounded backoff before throwing.
-Requests time out after `timeoutMs` (default 30 s).
+`429`/`500`/`502`/`503`/`504` are retried twice with bounded backoff before
+throwing. Search requests time out after `searchTimeoutMs` (default 120 s);
+other requests use `timeoutMs` (default 30 s).
 
 ---
 

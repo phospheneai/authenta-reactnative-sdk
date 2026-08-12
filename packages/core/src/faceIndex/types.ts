@@ -27,8 +27,14 @@ export interface FaceIndexClientConfig {
   baseUrl: string;
   /** Tenant UUID. The server scopes every operation to this tenant. */
   tenantId: string;
-  /** Per-request timeout in ms. Default 30000. */
+  /** Per-request timeout in ms for non-search requests. Default 30000. */
   timeoutMs?: number;
+  /**
+   * Search timeout in ms. Default 120000 because large image transfers and face
+   * embedding take longer than the other FaceIndex operations.
+   * When omitted, an explicitly supplied `timeoutMs` is also used for search.
+   */
+  searchTimeoutMs?: number;
 }
 
 // ─── POST /v1/enroll ──────────────────────────────────────────────────────────
@@ -73,7 +79,7 @@ export interface TenantResponse {
   subjects: TenantSubject[];
 }
 
-// ─── GET /v1/search ───────────────────────────────────────────────────────────
+// ─── POST /v1/search ──────────────────────────────────────────────────────────
 
 export interface SearchMatch {
   rank: number;

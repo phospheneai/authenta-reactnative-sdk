@@ -25,7 +25,6 @@ Two independent components:
 - [AuthentaFaceIndex](#authentafaceindex)
   - [Flow](#flow)
   - [Props](#props-1)
-  - [Search image size](#search-image-size)
 - [Choosing between the two](#choosing-between-the-two)
 - [Using AuthentaClient Directly](#using-authentaclient-directly)
 - [Error Handling](#error-handling)
@@ -286,8 +285,7 @@ sessions.
 2. **Indexing** — uploads to S3 and polls until every embedding is stored.
 3. **Faces Indexed** — per-photo status, with any server error shown inline.
 4. **Search a Face** — take a photo with the camera or pick one from the
-   library. The image is downscaled before searching, because the API carries it
-   in a query string — see [Search image size](#search-image-size).
+   library. The original bytes are Base64 encoded and sent in a POST body.
 5. **Search Results** — matches ranked by similarity, strongest first.
 
 The modal stays open after each step so the user can keep enrolling or
@@ -317,41 +315,10 @@ Enrolling and searching both read from the photo library, so
 needs `NSCameraUsageDescription` — but never the microphone, since face indexing
 never records video.
 
-### Search image size
-
-`GET /v1/search` sends the photo inside the URL, so how large a photo may be
-depends on the server's request-line limit — a deployment detail your app has no
-way of knowing. An unmodified camera photo overflows a default nginx and comes
-back as `414 Request-URI Too Large`.
-
-**The modal handles this for you.** It sends the best quality first and steps
-down the ladder (800 → 512 → 384 → 288 → 224 → 160 px) only when the server
-actually answers `414`, keeping the largest size that host accepts. The rung it
-lands on is remembered, so the first search may cost a few quick attempts and
-every later one costs a single request. Nothing to configure — whatever the user
-captures or picks produces a result.
-
-If you already know your server's limit, set it and skip the discovery round
-trips entirely:
-
-```ts
-const faces = new FaceIndexClient({
-  baseUrl, tenantId,
-  maxSearchImageChars: 7000,   // matches nginx's default 8 KB request line
-});
-```
-
-Raising the server's limit is what actually improves match quality, because the
-ladder will then settle on a larger image:
-
-```nginx
-large_client_header_buffers 4 64k;   # nginx default is 4 8k
-```
-
-> On a default 8 KB server the ladder settles around 224 px. That is fine when
-> the face fills the frame, but a small or distant face may return "No face was
-> found" — the image is legal, the face is just too few pixels. Raising the
-> server limit (or moving `/v1/search` to a `POST` body) is the real fix.
+Camera and library searches follow the same path: the SDK reads the original
+file, converts it to padded URL-safe Base64, and sends `tenant_id` and
+`image_bytes` in the JSON body of `POST /v1/search`. Only `limit` remains in the
+query string. Search has a 120-second timeout for transfer and face embedding.
 
 ---
 
@@ -478,7 +445,7 @@ whose `message` is already safe to show a user (the raw server text is kept at
 | Unreadable / unsupported image | `"That image could not be read. Choose a JPEG, PNG, or WebP photo."` |
 | Search image too large for the URL | `"The search image is too large to send in the request URL…"` |
 | Storage failure | `"The face indexing storage is temporarily unavailable. Please try again."` |
-| Host unreachable / wrong IP | `"The face indexing server at … did not respond within 30000ms."` |
+| Search timed out / host unreachable | `"The face indexing server at … did not respond within 120000ms."` |
 
 The modal shows the same message on its error screen with a **Try Again** button
 that returns to the home page.

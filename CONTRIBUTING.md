@@ -304,23 +304,18 @@ half-built subject on the server:
 | Only `image/jpeg`, `image/png`, `image/webp` | `describeImage()` — validated **before** `POST /v1/enroll` |
 | All files read before the subject is created | `enrollImages()` |
 | Search `limit` clamped to 1–50 | `search()` |
-| Query image sent as unpadded URL-safe Base64 | `search()` |
-| `502`/`503`/`504` retried twice with backoff | `request()` |
+| Query image sent as padded URL-safe Base64 in a POST JSON body | `search()` |
+| `429`/`500`/`502`/`503`/`504` retried twice with backoff | `request()` |
 
-`/v1/search` puts the image in the query string, so its size is bounded by the
-server's request-line limit — unknowable from the app. Rather than hard-code a
-guess, the client stays permissive (`maxSearchImageChars` defaults to 200 000)
-and reports both a server `414` and a local ceiling breach as code
-`uri_too_long`. `AuthentaFaceIndex` uses that single code to walk the
-`SEARCH_STEPS` ladder in `media.ts` down until the server accepts the image,
-then reuses that rung for the session. Keep the two codes identical — the retry
-loop branches on it.
+`POST /v1/search?limit=…` carries `tenant_id` and `image_bytes` in its JSON
+body. Keep large image data out of the URL: React Native's networking path and
+HTTP proxies may reject or truncate multi-megabyte request targets.
 
 On the UI side, `packages/react-native/src/media.ts` transcodes anything the
 server will not accept (iOS hands back HEIC) to JPEG before enrolling, and
-downscales the search photo to 800 px because the API carries it in a query
-string. Enrollment is only complete once every face reaches `processed` or
-`failed` — always go through `waitForEnrollment()`.
+reads search photos without resizing or re-encoding them. Enrollment is only
+complete once every face reaches `processed` or `failed` — always go through
+`waitForEnrollment()`.
 
 Face indexing and detection are mutually exclusive per session: a face-indexing
 run executes no detection model. Host apps should present them as separate
