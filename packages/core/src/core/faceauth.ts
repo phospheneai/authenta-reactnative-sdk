@@ -84,10 +84,16 @@ export async function faceEnrol(
     );
   }
 
-  // The response preserves the order of `images`.
+  // The response preserves the order of `images`. Each face's status reflects
+  // its own upload outcome — one failed PUT doesn't sink the whole batch.
   for (let i = 0; i < created.faces.length; i++) {
     const face = created.faces[i];
-    await putToPresignedUrl(face.upload_url, sources[i], face.headers?.['Content-Type'] ?? described[i].contentType);
+    try {
+      await putToPresignedUrl(face.upload_url, sources[i], face.headers?.['Content-Type'] ?? described[i].contentType);
+      face.status = 'uploaded';
+    } catch {
+      face.status = 'failed';
+    }
   }
 
   return created;

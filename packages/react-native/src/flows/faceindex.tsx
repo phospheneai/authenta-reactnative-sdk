@@ -21,7 +21,7 @@ import { HIT_SLOP, s } from '../theme';
 import type { AuthentaCaptureProps, CameraPosition, FaceIndexStep, PickedImage } from '../types';
 import { Badge, Button, ErrorView, Outcome, Page, Row, Sheet, Spinner, useModalFlow } from '../ui';
 
-const TONE_FOR = { processed: 'ok', failed: 'bad' } as const;
+const TONE_FOR = { processed: 'ok', uploaded: 'ok', failed: 'bad' } as const;
 
 export function FaceIndexFlow({
   client,
@@ -248,7 +248,7 @@ export function FaceIndexFlow({
           <View style={s.card}>
             {enrolled.faces.map((face, i) => (
               <Row key={face.face_id} first={i === 0} title={face.face_id}
-                meta="Uploaded"
+                meta={face.status === 'failed' ? 'Upload failed' : 'Uploaded'}
                 right={<Badge label={face.status} tone={TONE_FOR[face.status as keyof typeof TONE_FOR] ?? 'pending'} />} />
             ))}
           </View>
