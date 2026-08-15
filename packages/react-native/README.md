@@ -50,6 +50,7 @@ The two features are mutually exclusive; asking for both raises a `ValidationErr
 | react-native-compressor | ≥ 1.18 |
 | react-native-nitro-modules | ≥ 0.35 |
 | react-native-nitro-image | ≥ 0.14 |
+| @bam.tech/react-native-image-resizer | ≥ 3.0 |
 
 ---
 
@@ -60,7 +61,8 @@ npm install @authenta/react-native
 
 npm install react-native-vision-camera react-native-image-picker \
   react-native-blob-util react-native-compressor \
-  react-native-nitro-modules react-native-nitro-image
+  react-native-nitro-modules react-native-nitro-image \
+  @bam.tech/react-native-image-resizer
 ```
 
 Then link the native modules:
@@ -257,9 +259,19 @@ Both halves take photos from **the camera or the library**. HEIC from the iOS
 library is converted to JPEG automatically for enrolment, since the server
 accepts only JPEG, PNG, and WebP.
 
-Search photos are sent **exactly as captured** — no resizing or re-encoding, so
-the EXIF orientation face detection relies on stays intact. The bytes travel in
-a JSON POST body, so there is no URL length limit.
+Search photos are downscaled before upload, then posted as
+`multipart/form-data`. The ladder tries **560 → 480 → 400 → 320 px** and stops
+at the first result under **74,000 bytes**, so a full-resolution camera photo
+never goes over the wire.
+
+Size costs nothing here: measured against the live API, every size from 560 px
+down to 160 px returned the *same* top match within a 1.8-point band
+(0.8797–0.8974). The embedding model crops to 112×112 internally, so extra
+pixels buy nothing.
+
+What *does* matter is that the resize bakes EXIF rotation into the pixels. An
+image left with a bogus orientation tag is read sideways by face detection and
+comes back as `no_face_detected`.
 
 The modal stays open after each step so the user can keep going. Close it from
 `onClose` when you would rather show results in your own UI.

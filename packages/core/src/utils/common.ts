@@ -52,10 +52,16 @@ export async function request<T>(
     if (qs) url += `?${qs}`;
   }
 
+  // FormData must go through untouched: JSON.stringify would flatten it to
+  // "{}", and the Content-Type has to carry the multipart boundary, which only
+  // fetch can generate — so drop ours and let it set the header.
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+  const { 'Content-Type': _json, ...formHeaders } = headers;
+
   const response = await fetch(url, {
     method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    headers: isForm ? formHeaders : headers,
+    body: isForm ? (body as any) : body !== undefined ? JSON.stringify(body) : undefined,
   });
 
   if (!response.ok) {

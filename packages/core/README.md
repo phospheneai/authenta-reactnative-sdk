@@ -1,6 +1,11 @@
 # @authenta/core
 
-Pure TypeScript API client for the [Authenta](https://authenta.ai) platform. Works in **Node.js** and **React Native** — no native modules or UI dependencies.
+TypeScript API client for the [Authenta](https://authenta.ai) platform — no UI dependencies.
+
+> **React Native only, currently.** `faceSearch()` converts the query image to
+> JPEG using `@bam.tech/react-native-image-resizer`, which `internal/fileSource`
+> imports at the top level. That pulls in `react-native`, so the package no
+> longer loads under Node.js. See [Installation](#installation).
 
 One client, two features:
 
@@ -40,7 +45,23 @@ control; for ready-made UI use [`@authenta/react-native`](https://www.npmjs.com/
 npm install @authenta/core
 ```
 
-No peer dependencies. Works in Node.js ≥ 16 and React Native ≥ 0.72.
+Requires React Native ≥ 0.72 plus two native modules:
+
+```bash
+npm install @bam.tech/react-native-image-resizer react-native-blob-util
+cd ios && pod install && cd ..
+```
+
+| Module | Used for | Declared as |
+|---|---|---|
+| `@bam.tech/react-native-image-resizer` | JPEG conversion in `faceSearch()` | ⚠️ `devDependencies` |
+| `react-native-blob-util` | File reads and presigned uploads | `optionalDependencies` |
+
+> ⚠️ The image resizer is imported at the top level of `internal/fileSource.ts`
+> but only listed under `devDependencies`, so a consumer installing this package
+> will not get it and every import of `@authenta/core` fails. It needs moving to
+> `dependencies` or `peerDependencies`. The same import is why Node.js usage —
+> `examples/core/` and `__tests__/` — is currently broken.
 
 ---
 
@@ -190,9 +211,9 @@ Three endpoints, all on the same host and API key as detection:
 
 | Method | Endpoint |
 |---|---|
-| `faceEnrol(images)` | `POST /api/v1/facesim/enroll` |
-| `tenants()` | `GET /api/v1/facesim/subjects` |
-| `faceSearch(image, opts)` | `POST /api/v1/facesim/search` |
+| `faceEnrol(images)` | `POST /api/v1/facesim/v1/enroll` |
+| `tenants()` | `GET /api/v1/facesim/v1/subjects` |
+| `faceSearch(image, opts)` | `POST /api/v1/facesim/v1/search` |
 
 ### faceEnrol()
 
@@ -227,14 +248,21 @@ for (const match of response.results) {
 }
 ```
 
-The argument is either a **local file URI** (read and encoded for you) or a
-**Base64 string** you prepared yourself — including a `data:image/…;base64,…`
-value, which is normalised. The bytes are sent exactly as they sit on disk: the
-SDK never resizes or re-encodes them, so nothing disturbs the EXIF orientation
-that face detection depends on.
+Pass a **local file URI**. The image is converted to JPEG (max 4096 px, quality
+95, scaled down only) and posted as **`multipart/form-data`**:
 
-The image travels as `image_bytes` in the JSON **POST body**, so there is no URL
-length limit to worry about. `limit` defaults to 50 and is clamped to 1–50.
+| Field | Value |
+|---|---|
+| `image` | the JPEG file |
+| `limit` | 1–50, default 50 |
+
+Conversion matters for more than format. Baking any EXIF rotation into the
+pixels is what keeps face detection working — an image left with a bogus
+orientation tag is read sideways and comes back as `no_face_detected`.
+
+Multipart also sidesteps the request-size ceiling that a Base64 JSON body ran
+into: `express.json()` defaults to a 100 KiB limit, which a single camera photo
+exceeds several times over.
 
 Search is independent of enrolment: it matches everything already indexed on the
 account, including from earlier sessions. The same subject can appear more than

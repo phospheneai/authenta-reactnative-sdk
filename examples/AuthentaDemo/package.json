@@ -15,6 +15,7 @@
   "dependencies": {
     "@authenta/core": "^1.0.6",
     "@authenta/react-native": "^1.0.8",
+    "@bam.tech/react-native-image-resizer": "^3.0.11",
     "react": "19.1.1",
     "react-native": "0.82.0",
     "react-native-blob-util": "0.24.7",

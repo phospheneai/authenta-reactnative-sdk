@@ -10,6 +10,7 @@
 
 import { AuthentaError } from '../errors';
 import { getMimeType } from '../utils/helpers';
+import ImageResizer from '@bam.tech/react-native-image-resizer';
 
 // Webpack/esbuild runtime require — declared without pulling in all @types/node.
 declare const __non_webpack_require__: ((id: string) => any) | undefined;
@@ -52,6 +53,34 @@ export function normalizeLocalUri(input: string): string {
 
   console.log('[AuthentaClient] normalizeLocalUri output:', JSON.stringify(uri));
   return uri;
+}
+
+export async function normalizeImageToJpeg(uri: string): Promise<string> {
+  const normalizedUri = normalizeLocalUri(uri);
+
+  try {
+    const result = await ImageResizer.createResizedImage(
+      normalizedUri,
+      4096,
+      4096,
+      'JPEG',
+      95,
+      0,
+      null,
+      false,
+      {
+        mode: 'contain',
+        onlyScaleDown: true,
+      },
+    );
+
+    return result.uri;
+  } catch {
+    throw new AuthentaError(
+      'Could not convert the selected image to JPEG.',
+      'image_conversion_failed',
+    );
+  }
 }
 
 export function stripFileProtocol(uri: string): string {
@@ -173,64 +202,4 @@ export async function putToPresignedUrl(
       putResponse.status,
     );
   }
-}
-
-/** Read a local file as standard (padded) Base64. */
-export async function readFileAsBase64(uri: string): Promise<string> {
-  const normalizedUri = normalizeLocalUri(uri);
-
-  if (isReactNativeRuntime() && (normalizedUri.startsWith('file://') || normalizedUri.startsWith('content://'))) {
-    const blobUtil = getReactNativeBlobUtil();
-    if (blobUtil?.fs?.readFile) {
-      const filePath = normalizedUri.startsWith('file://') ? stripFileProtocol(normalizedUri) : normalizedUri;
-      return blobUtil.fs.readFile(filePath, 'base64');
-    }
-  }
-
-  // Node.js environment — XMLHttpRequest does not exist
-  if (typeof XMLHttpRequest === 'undefined') {
-    const _require = require;
-    // Typed as any — core does not depend on @types/node.
-    const fs = _require('fs');
-    return fs.readFileSync(normalizedUri.replace(/^file:\/\//, '')).toString('base64');
-  }
-
-  // React Native without blob-util — round-trip through FileReader.
-  const source = await resolveUri(normalizedUri);
-  if (!source.blob) {
-    throw new AuthentaError(`Could not read file at URI: ${normalizedUri}`);
-  }
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result ?? '');
-      const comma = dataUrl.indexOf(',');
-      resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
-    };
-    reader.onerror = () => reject(new AuthentaError(`Could not read file at URI: ${normalizedUri}`));
-    reader.readAsDataURL(source.blob as Blob);
-  });
-}
-
-/**
- * Match Python's `base64.urlsafe_b64encode(...).decode()` output exactly:
- * URL-safe alphabet, no whitespace, and padding retained.
- */
-export function toBase64Url(base64: string): string {
-  const value = String(base64 ?? '')
-    .replace(/^data:[^,]+,/i, '')
-    .replace(/\s/g, '');
-
-  // Reject corruption locally instead of sending an invalid query to the API.
-  if (!/^[A-Za-z0-9+/_-]*={0,2}$/.test(value)) {
-    throw new AuthentaError('Could not encode the selected image as Base64.', 'invalid_base64');
-  }
-
-  const unpadded = value.replace(/=+$/, '');
-  if (unpadded.length % 4 === 1) {
-    throw new AuthentaError('Could not encode the selected image as Base64.', 'invalid_base64');
-  }
-
-  const urlSafe = unpadded.replace(/\+/g, '-').replace(/\//g, '_');
-  return urlSafe + '='.repeat((4 - (urlSafe.length % 4)) % 4);
 }

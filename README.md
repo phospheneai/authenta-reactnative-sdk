@@ -4,7 +4,7 @@ This repository contains the Authenta SDK published as two independent npm packa
 
 | Package | npm | Description |
 |---|---|---|
-| [`@authenta/core`](./packages/core) | [![npm](https://img.shields.io/npm/v/@authenta/core)](https://www.npmjs.com/package/@authenta/core) | Pure TypeScript API client — works in Node.js and React Native |
+| [`@authenta/core`](./packages/core) | [![npm](https://img.shields.io/npm/v/@authenta/core)](https://www.npmjs.com/package/@authenta/core) | TypeScript API client — React Native (see the note below) |
 | [`@authenta/react-native`](./packages/react-native) | [![npm](https://img.shields.io/npm/v/@authenta/react-native)](https://www.npmjs.com/package/@authenta/react-native) | React Native capture modal powered by `@authenta/core` |
 
 ---
@@ -30,7 +30,12 @@ Both run on the same host and API key.
 |---|---|
 | React Native app — want ready-made UI | `@authenta/react-native` |
 | React Native app — have your own UI | `@authenta/core` |
-| Node.js backend / script | `@authenta/core` |
+
+> **Node.js is currently broken.** `faceSearch()` converts images with
+> `@bam.tech/react-native-image-resizer`, imported at the top of
+> `internal/fileSource.ts`. That drags in `react-native`, so `require('@authenta/core')`
+> throws under Node — which also takes out `examples/core/` and the integration
+> tests. Making that import lazy would restore it.
 
 ---
 
@@ -53,9 +58,9 @@ const client = new AuthentaClient({
 | Method | Endpoint | Description |
 |---|---|---|
 | `uploadAndPoll(uri, model, options?)` | `/api/v1/jobs` | Upload → finalize → poll → result. Returns `ProcessedMedia`, or `CreateMediaResponse` when `autoPolling: false` |
-| `faceEnrol(images)` | `POST /api/v1/facesim/enroll` | Create a subject and upload each photo. Returns `EnrollResponse` |
-| `faceSearch(image, options?)` | `POST /api/v1/facesim/search` | Rank enrolled faces against a photo. Returns `SearchResponse` |
-| `tenants()` | `GET /api/v1/facesim/subjects` | Every subject and face on the account |
+| `faceEnrol(images)` | `POST /api/v1/facesim/v1/enroll` | Create a subject and upload each photo. Returns `EnrollResponse` |
+| `faceSearch(image, options?)` | `POST /api/v1/facesim/v1/search` | Rank enrolled faces against a photo. Returns `SearchResponse` |
+| `tenants()` | `GET /api/v1/facesim/v1/subjects` | Every subject and face on the account |
 
 ```ts
 // Detection
@@ -67,8 +72,8 @@ const subject = await client.faceEnrol([{ uri: 'file:///front.jpg' }]);
 const matches = await client.faceSearch('file:///query.jpg', { limit: 10 });
 ```
 
-`faceSearch()` takes a local file URI or Base64. The bytes are sent untouched in
-a JSON POST body — no resizing, no re-encoding, no URL length limit.
+`faceSearch()` takes a local file URI. The image is converted to JPEG and posted
+as `multipart/form-data`, which keeps it clear of the JSON body-size limit.
 
 ---
 
@@ -104,7 +109,8 @@ compression, upload, polling, and error UI.
 ```bash
 npm install react-native-vision-camera react-native-image-picker \
   react-native-blob-util react-native-compressor \
-  react-native-nitro-modules react-native-nitro-image
+  react-native-nitro-modules react-native-nitro-image \
+  @bam.tech/react-native-image-resizer
 ```
 
 No microphone permission is required — video is recorded without audio.
@@ -126,13 +132,13 @@ Detection — uploadAndPoll()
 ```
 Face indexing
 ─────────────
-faceEnrol()    POST /api/v1/facesim/enroll     → subject_id + one signed URL per image
-               PUT each image to S3            (embeddings follow out of band)
+faceEnrol()    POST /api/v1/facesim/v1/enroll    → subject_id + one signed URL per image
+               PUT each image to S3              (embeddings follow out of band)
 
-tenants()      GET  /api/v1/facesim/subjects   → every subject and face + status
+tenants()      GET  /api/v1/facesim/v1/subjects  → every subject and face + status
 
-faceSearch()   POST /api/v1/facesim/search     → matches ranked by similarity_score
-               body: { image_bytes, limit }
+faceSearch()   POST /api/v1/facesim/v1/search    → matches ranked by similarity_score
+               multipart/form-data: image, limit
 ```
 
 ---
@@ -198,6 +204,9 @@ packages.
 ---
 
 ## Running the integration tests
+
+> These do not run today — `@authenta/core` cannot be imported under Node.js
+> (see above). The commands below apply once that import is made lazy.
 
 The detection tests hit the real API. Set your key and sample file paths in
 `packages/core/__tests__/setup.ts`, then:

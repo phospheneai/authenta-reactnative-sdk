@@ -11,7 +11,7 @@
  */
 
 import { ValidationError } from '../errors';
-import { putToPresignedUrl, readFileAsBase64, toBase64Url } from '../internal/fileSource';
+import { putToPresignedUrl, normalizeImageToJpeg } from '../internal/fileSource';
 import { request, resolveUri } from '../utils/common';
 import type { RequestContext } from '../utils/common';
 import { getMimeType } from '../utils/helpers';
@@ -108,11 +108,46 @@ export async function faceSearch(
   const raw = String(image ?? '').trim();
   if (!raw) throw new ValidationError('A query image is required to search faces.');
 
-  // Sent exactly as it sits on disk — nothing re-encodes the photo.
-  const base64 = isUri(raw) ? await readFileAsBase64(raw) : raw.replace(/^data:[^,]+,/, '');
+  // Verbose on purpose: search is the one call whose failures are hard to tell
+  // apart from the client — every stage prints so a silent failure is visible.
+  const url = `${ctx.baseUrl}${BASE}/search`;
+  const capped = Math.min(Math.max(Math.trunc(limit), 1), MAX_SEARCH_LIMIT);
+  console.log('[faceSearch] 1/4 input:', raw.slice(0, 120), `(len ${raw.length})`);
 
-  return request<SearchResponse>(ctx, 'POST', `${BASE}/search`, {
-    image_bytes: toBase64Url(base64),
-    limit: Math.min(Math.max(Math.trunc(limit), 1), MAX_SEARCH_LIMIT),
-  });
+  const jpegUri = await normalizeImageToJpeg(raw);
+  console.log('[faceSearch] 2/4 jpeg:', jpegUri);
+
+  try {
+    const { size } = await resolveUri(jpegUri);
+    console.log('[faceSearch]     size:', size, 'bytes');
+  } catch (e) {
+    console.log('[faceSearch]     size: unreadable —', (e as Error)?.message);
+  }
+
+  const form = new FormData();
+
+  form.append(
+    'image',
+    {
+      uri: jpegUri,
+      name: 'image.jpeg',
+      type: 'image/jpeg',
+    } as any,
+  );
+
+  form.append('limit', String(capped));
+
+  console.log('[faceSearch] 3/4 POST', url, `(multipart, limit ${capped})`);
+
+  try {
+    const res = await request<SearchResponse>(ctx, 'POST', `${BASE}/search`, form);
+    console.log('[faceSearch] 4/4 OK —', res.count, 'match(es)');
+    return res;
+  } catch (err) {
+    const e = err as any;
+    console.log('[faceSearch] 4/4 FAILED —',
+      e?.name, 'HTTP', e?.statusCode ?? '?', '|', e?.message);
+    if (e?.details) console.log('[faceSearch]     details:', JSON.stringify(e.details).slice(0, 300));
+    throw err;
+  }
 }
