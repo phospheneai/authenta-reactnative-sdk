@@ -228,6 +228,12 @@ Native app covering both features.
   <img src="examples/mobile-app-demo.gif" alt="Authenta Demo" width="200" height="400" />
 </p>
 
+
+Face Authentication (detection) and Face Indexing (enrol/search) demo
+
+<p align="center">
+  <img src="examples/face-auth-sample.gif" alt="Authenta Demo" width="200" height="400" />
+
 ---
 
 ## License
