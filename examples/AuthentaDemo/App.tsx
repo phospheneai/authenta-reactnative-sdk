@@ -27,8 +27,8 @@ import { AuthentaCapture } from '@authenta/react-native';
 // ─── One client for both features — your domain and API key ──────────────────
 
 const client = new AuthentaClient({
-  baseUrl: 'https://platform.authenta.ai',
-  api_key: 'api_db55918eda6dd1d466f5225e1684462e6f1334a2905abd0a06d55448b87ae3b0',
+  baseUrl: 'BACKEND_URL', // e.g. https://api.authenta.com
+  api_key: 'YOUR_API_KEY',
   auth_enabled: true,
 });
 

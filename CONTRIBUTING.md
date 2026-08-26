@@ -65,7 +65,7 @@ git clone https://github.com/phospheneai/authenta-reactnative-sdk.git
 cd authenta-reactnative-sdk
 
 cd packages/core && npm install
-cd ../react-native && npm install
+cd packages/react-native && npm install
 ```
 
 ---
@@ -77,7 +77,7 @@ package compiles against core's `dist/`, not its `src/`.
 
 ```bash
 cd packages/core && npm run build
-cd ../react-native && npm run build
+cd packages/react-native && npm run build
 ```
 
 Compiled output goes to `packages/*/dist/`. These folders are git-ignored.
@@ -93,10 +93,10 @@ the react-native build will compile against stale types:
 ```bash
 cd packages/core && npm run build
 
-rm -rf ../react-native/node_modules/@authenta/core/dist
-cp -R dist ../react-native/node_modules/@authenta/core/dist
+rm -rf packages/react-native/node_modules/@authenta/core/dist
+cp -R dist packages/react-native/node_modules/@authenta/core/dist
 
-cd ../react-native && npm run build
+cd packages/react-native && npm run build
 ```
 
 To run the demo app against local packages, do the same for
@@ -144,7 +144,7 @@ npx jest --testPathPattern=fi1-liveness     # one scenario
 directory that does not exist yet, so `npm test` currently fails with:
 
 ```
-Directory .../packages/react-native/__tests__ in the roots[0] option was not found.
+Directory /packages/react-native/__tests__ in the roots[0] option was not found.
 ```
 
 Mocks for the native modules already live in `packages/react-native/__mocks__/`
@@ -263,7 +263,7 @@ authenta-reactnative-sdk/
 4. Type-check both packages:
    ```bash
    cd packages/core && npx tsc --noEmit
-   cd ../react-native && npx tsc --noEmit --noUnusedLocals
+   cd packages/react-native && npx tsc --noEmit --noUnusedLocals
    ```
 5. If you changed the public API, update the relevant README (`packages/core/README.md`, `packages/react-native/README.md`, and the root `README.md` tables).
 
@@ -377,14 +377,14 @@ If you bump `@authenta/core`, also update the `"@authenta/core"` version in `pac
 
 ```bash
 cd packages/core && npm run build
-cd ../react-native && npm run build
+cd packages/react-native && npm run build
 ```
 
 ### 3. Dry run
 
 ```bash
 cd packages/core && npm publish --access public --dry-run
-cd ../react-native && npm publish --access public --dry-run
+cd packages/react-native && npm publish --access public --dry-run
 ```
 
 Verify only `dist/` files appear — no `src/`, `__tests__/`, or secrets.
@@ -395,7 +395,7 @@ Verify only `dist/` files appear — no `src/`, `__tests__/`, or secrets.
 npm login   # if not already logged in
 
 cd packages/core && npm publish --access public
-cd ../react-native && npm publish --access public
+cd packages/react-native && npm publish --access public
 ```
 
 ### 5. Verify
