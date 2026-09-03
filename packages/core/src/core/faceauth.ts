@@ -52,7 +52,7 @@ const isUri = (value: string) => /^(file|content|assets-library|ph):\/\//i.test(
 
 /** Every subject and face on the account. */
 export function tenants(ctx: RequestContext): Promise<TenantResponse> {
-  return request<TenantResponse>(ctx, 'GET', `${BASE}/subjects`);
+  return request<TenantResponse>(ctx, 'GET', `${BASE}/tenant`);
 }
 
 
